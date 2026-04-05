@@ -1,0 +1,8 @@
+{
+  "name": "brewery-simulator",
+  "private": true,
+  "description": "First-person brewery sim — run fetch-assets before first play for HD models/textures.",
+  "scripts": {
+    "fetch-assets": "node scripts/fetch-assets.mjs"
+  }
+}

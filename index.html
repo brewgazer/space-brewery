@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brewery Simulator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            overflow: hidden;
+            background: #0a0604;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        canvas { display: block; }
+
+        #ui-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #crosshair {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 24px; height: 24px;
+            pointer-events: none;
+        }
+        #crosshair::before,
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 1px;
+        }
+        #crosshair::before {
+            width: 2px; height: 24px;
+            left: 11px; top: 0;
+        }
+        #crosshair::after {
+            width: 24px; height: 2px;
+            top: 11px; left: 0;
+        }
+        #crosshair.active::before,
+        #crosshair.active::after {
+            background: rgba(255, 200, 50, 1);
+            filter: drop-shadow(0 0 4px rgba(255, 200, 50, 0.6));
+        }
+
+        #start-screen {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: radial-gradient(ellipse at center, #2c1a0e 0%, #0a0604 80%);
+            cursor: pointer;
+            user-select: none;
+        }
+        #start-screen h1 {
+            font-size: 64px;
+            color: #ffd700;
+            text-shadow: 3px 3px 12px rgba(255,165,0,0.5), 0 0 40px rgba(255,165,0,0.2);
+            margin-bottom: 10px;
+            letter-spacing: 4px;
+        }
+        #start-screen .subtitle {
+            font-size: 22px;
+            color: #b87333;
+            margin-bottom: 50px;
+            letter-spacing: 2px;
+        }
+        #start-screen .click-prompt {
+            font-size: 26px;
+            color: #fff;
+            animation: pulse 2s ease-in-out infinite;
+            margin-bottom: 40px;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+        }
+        #start-screen .controls {
+            color: #998877;
+            font-size: 15px;
+            line-height: 2;
+            text-align: center;
+            background: rgba(0,0,0,0.3);
+            padding: 20px 40px;
+            border-radius: 12px;
+            border: 1px solid rgba(184,115,51,0.3);
+        }
+        #start-screen .controls span {
+            color: #ddb874;
+            font-weight: bold;
+        }
+
+        .beer-icon {
+            font-size: 80px;
+            margin-bottom: 15px;
+            display: block;
+            filter: drop-shadow(0 0 20px rgba(255,165,0,0.4));
+        }
+    </style>
+</head>
+<body>
+    <div id="ui-overlay">
+        <div id="crosshair"></div>
+    </div>
+
+    <div id="start-screen">
+        <span class="beer-icon">🍺</span>
+        <h1>BREWERY SIM</h1>
+        <div class="subtitle">Brew. Ferment. Serve. Repeat.</div>
+        <div id="loading-line" style="font-size:15px;color:#887766;margin-bottom:12px;min-height:22px;"></div>
+        <div class="click-prompt">Click Anywhere to Start</div>
+        <div class="controls">
+            <span>WASD</span> Move &nbsp;&bull;&nbsp;
+            <span>Mouse</span> Look &nbsp;&bull;&nbsp;
+            <span>E</span> Interact<br>
+            <span>1–0</span> Select Recipe/Keg<br>
+            <span>F</span> Send Customers &nbsp;&bull;&nbsp;
+            <span>ESC</span> Pause<br><br>
+            Brew &rarr; Ferment &rarr; Keg &rarr; Serve &rarr; Upgrade!
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module" src="main.js"></script>
+</body>
+</html>
