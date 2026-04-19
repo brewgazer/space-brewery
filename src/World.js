@@ -226,6 +226,53 @@ export class World {
         });
     }
 
+    /**
+     * Wall material used on the taproom's curved outer arc. Uses the obsidian
+     * tile PBR set when AssetLoader was able to pull it out of
+     * obsidian_tile.glb; otherwise falls back to the neutral hull panel so
+     * playtesters still get a wall. Cached because every arc segment shares
+     * the same material instance.
+     */
+    _taproomWallMaterial() {
+        if (this._taproomWallMatCache) return this._taproomWallMatCache;
+        const ob = this.assets?.textures?.obsidianTile;
+        if (!ob?.map) {
+            this._taproomWallMatCache = this._hullPanelMaterial();
+            return this._taproomWallMatCache;
+        }
+        // ~2.5 m per tile horizontally, full wall height vertically. The curved
+        // wall is made of many short rotated boxes — repeating by a fixed count
+        // on each box keeps the stone from getting cartoonishly stretched on
+        // longer segments without introducing visible seams between them.
+        const repX = 2;
+        const repY = 2;
+        const setRep = (t) => {
+            if (!t) return;
+            t.wrapS = t.wrapT = THREE.RepeatWrapping;
+            t.repeat.set(repX, repY);
+            t.needsUpdate = true;
+        };
+        setRep(ob.map);
+        setRep(ob.normalMap);
+        setRep(ob.roughnessMap);
+        setRep(ob.metalnessMap);
+        setRep(ob.aoMap);
+        const mat = new THREE.MeshStandardMaterial({
+            map: ob.map,
+            normalMap: ob.normalMap || null,
+            roughnessMap: ob.roughnessMap || null,
+            metalnessMap: ob.metalnessMap || null,
+            aoMap: ob.aoMap || null,
+            color: 0xffffff,
+            roughness: ob.roughnessMap ? 1.0 : 0.55,
+            metalness: ob.metalnessMap ? 1.0 : 0.18,
+            envMapIntensity: 0.85,
+            emissive: 0x000000,
+        });
+        this._taproomWallMatCache = mat;
+        return mat;
+    }
+
     /** Electric mint / teal accent (less cold blue than before). */
     _cyanGlowMat(intensity = 0.85) {
         return new THREE.MeshStandardMaterial({
@@ -389,8 +436,8 @@ export class World {
          * @param {number} cx @param {number} cz @param {number} w @param {number} d
          * @param {number} [yaw] @param {boolean} [addCollider]
          */
-        const makeWall = (cx, cz, w, d, yaw = 0, addCollider = true) => {
-            const m = new THREE.Mesh(new THREE.BoxGeometry(w, wallH, d), wm);
+        const makeWall = (cx, cz, w, d, yaw = 0, addCollider = true, mat = wm) => {
+            const m = new THREE.Mesh(new THREE.BoxGeometry(w, wallH, d), mat);
             m.position.set(cx, wallH / 2, cz);
             m.rotation.y = yaw;
             m.castShadow = false;
@@ -440,6 +487,10 @@ export class World {
         this.scene.add(lintel);
 
         // Curved taproom outer wall — half-ellipse arc with an entrance gap at the south apex.
+        // Every arc segment shares one obsidian material (falls back to the
+        // hull panel if the GLB didn't ship maps) so the taproom reads as
+        // volcanic-glass while the brewery side keeps its lighter panels.
+        const taproomWallMat = this._taproomWallMaterial();
         const ARC_SEGMENTS = 46;
         /** Gap around t = π/2 (apex) for the main south entrance. */
         const ENTRANCE_GAP_HALF = 0.06; // ±6% of arc (~ the original 3 m opening)
@@ -459,12 +510,14 @@ export class World {
             const dz = z1 - z0;
             const len = Math.hypot(dx, dz);
             const yaw = Math.atan2(-dz, dx); // align local +X with segment direction
-            makeWall(cx, cz, len + 0.04, 0.3, yaw);
+            makeWall(cx, cz, len + 0.04, 0.3, yaw, true, taproomWallMat);
         }
 
         // Short return walls on either side of the south entrance — mask the curved gap
-        // from behind & give the doorway a "wall thickness" feel.
-        const entranceFrameMat = wm;
+        // from behind & give the doorway a "wall thickness" feel. They sit at
+        // the end of the taproom arc, so they reuse the obsidian material to
+        // keep the entrance jamb continuous with the curved wall.
+        const entranceFrameMat = taproomWallMat;
         const entreturnW = 0.35;
         const entreturnD = 1.6;
         const entreturnX = 1.9;

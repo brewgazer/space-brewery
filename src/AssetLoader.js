@@ -66,6 +66,12 @@ export async function loadGameAssets(renderer, scene) {
         metal: null,
         /** Wall-art posters used by the taproom (nullable individually). */
         posters: { astralBrew: null, astroBeer: null, novaLager: null },
+        /**
+         * PBR texture set pulled out of obsidian_tile.glb at load-time. Used by
+         * the taproom's curved outer wall (see World._taproomWallMaterial).
+         * Any sub-map may be null if the GLB didn't ship one.
+         */
+        obsidianTile: { map: null, normalMap: null, roughnessMap: null, metalnessMap: null, aoMap: null },
     };
 
     const texLoader = new THREE.TextureLoader();
@@ -323,6 +329,54 @@ export async function loadGameAssets(renderer, scene) {
         taproomChandelierTemplate = chGltf.scene;
     } catch (e) {
         console.warn('ufo_modern_chandelier glTF missing — taproom keeps pendant lights.', e?.message || e);
+    }
+
+    // Pull PBR wall maps out of the obsidian tile GLB. We only need the maps
+    // (not the geometry) so we traverse the first textured material we find
+    // and clone each map so per-material `.repeat` tweaks in World.js don't
+    // stomp on each other across reuses.
+    try {
+        const obsGltf = await withTimeout(
+            loader.loadAsync('assets/models/obsidian_tile.glb'),
+            60000,
+            'obsidian_tile.glb'
+        );
+        let pickedMat = null;
+        obsGltf.scene.traverse((o) => {
+            if (pickedMat) return;
+            if (!o.isMesh) return;
+            const m = Array.isArray(o.material) ? o.material[0] : o.material;
+            if (m && (m.map || m.normalMap || m.roughnessMap)) pickedMat = m;
+        });
+        if (pickedMat) {
+            const cloneMap = (t, isColor) => {
+                if (!t) return null;
+                const c = t.clone();
+                c.needsUpdate = true;
+                c.wrapS = c.wrapT = THREE.RepeatWrapping;
+                c.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+                const maxA = renderer.capabilities.getMaxAnisotropy?.() ?? 4;
+                c.anisotropy = Math.min(8, maxA);
+                c.userData = { ...(c.userData || {}), shared: true };
+                return c;
+            };
+            textures.obsidianTile.map = cloneMap(pickedMat.map, true);
+            textures.obsidianTile.normalMap = cloneMap(pickedMat.normalMap, false);
+            textures.obsidianTile.roughnessMap = cloneMap(pickedMat.roughnessMap, false);
+            textures.obsidianTile.metalnessMap = cloneMap(pickedMat.metalnessMap, false);
+            textures.obsidianTile.aoMap = cloneMap(pickedMat.aoMap, false);
+            console.info(
+                'Obsidian tile maps loaded:',
+                Object.entries(textures.obsidianTile)
+                    .filter(([, v]) => v)
+                    .map(([k]) => k)
+                    .join(', ')
+            );
+        } else {
+            console.warn('obsidian_tile.glb had no textured material — taproom wall falls back to hull panel.');
+        }
+    } catch (e) {
+        console.warn('obsidian_tile.glb missing — taproom wall keeps hull panel look.', e?.message || e);
     }
 
     let jukeboxTemplate = null;
