@@ -146,19 +146,22 @@ export class AudioSystem {
     }
 
     /**
-     * Gameplay: pick a random starting track, then cycle 1→2→3→4 in order (rotated) until stopped.
+     * Gameplay: pick a random starting track, then continue with a random
+     * shuffle (never repeats the same track back-to-back) until stopped.
+     * Previously this was a sequential 1→2→3→4 loop; the jukebox feature
+     * expects the background playlist to feel random on repeat so the
+     * chosen track flowing back into the normal mix doesn't sound scripted.
      */
     startGameBackgroundMusic() {
         try {
             this._detachBgmEnded();
             const start = Math.floor(Math.random() * BGM_TRACKS.length);
-            this._gameBgmOrder = [0, 1, 2, 3].map((i) => (start + i) % BGM_TRACKS.length);
-            this._gameBgmOrderIdx = 0;
+            this._gameBgmLastIdx = start;
             this._bgmMode = 'game';
             const a = this._ensureBgmElement();
             a.loop = false;
             a.pause();
-            a.src = BGM_TRACKS[this._gameBgmOrder[this._gameBgmOrderIdx]];
+            a.src = BGM_TRACKS[start];
             a.volume = this.bgmVolume;
             a.onended = () => this._onGameBgmTrackEnded();
             a.play().catch((e) => console.warn('Game BGM play:', e?.message || e));
@@ -167,15 +170,58 @@ export class AudioSystem {
         }
     }
 
+    /**
+     * Pick a random track index that is different from `lastIdx`. When there
+     * is only one track (should never happen in this game) we just return
+     * the same index so callers don't hang waiting for a fresh pick.
+     */
+    _pickRandomBgmIdx(lastIdx) {
+        if (BGM_TRACKS.length <= 1) return 0;
+        let next = Math.floor(Math.random() * BGM_TRACKS.length);
+        if (next === lastIdx) next = (next + 1) % BGM_TRACKS.length;
+        return next;
+    }
+
     _onGameBgmTrackEnded() {
-        if (this._bgmMode !== 'game' || !this._gameBgmOrder?.length || !this._bgm) return;
-        this._gameBgmOrderIdx = (this._gameBgmOrderIdx + 1) % this._gameBgmOrder.length;
-        const trackIdx = this._gameBgmOrder[this._gameBgmOrderIdx];
+        if (this._bgmMode !== 'game' || !this._bgm) return;
+        const next = this._pickRandomBgmIdx(this._gameBgmLastIdx ?? -1);
+        this._gameBgmLastIdx = next;
         const a = this._bgm;
         a.pause();
-        a.src = BGM_TRACKS[trackIdx];
+        a.src = BGM_TRACKS[next];
         a.volume = this.bgmVolume;
         a.play().catch((e) => console.warn('Game BGM advance:', e?.message || e));
+    }
+
+    /**
+     * Jukebox: immediately switch the gameplay BGM channel to the chosen
+     * track. When that track ends the normal `_onGameBgmTrackEnded` shuffle
+     * handler takes over, so the playlist resumes in random order on
+     * repeat without any further jukebox involvement.
+     *
+     * @param {number} trackIdx zero-based index into `BGM_TRACKS`
+     * @returns {boolean} true if playback was initiated
+     */
+    playJukeboxTrack(trackIdx) {
+        if (!Number.isInteger(trackIdx) || trackIdx < 0 || trackIdx >= BGM_TRACKS.length) {
+            return false;
+        }
+        try {
+            this._detachBgmEnded();
+            this._gameBgmLastIdx = trackIdx;
+            this._bgmMode = 'game';
+            const a = this._ensureBgmElement();
+            a.loop = false;
+            a.pause();
+            a.src = BGM_TRACKS[trackIdx];
+            a.volume = this.bgmVolume;
+            a.onended = () => this._onGameBgmTrackEnded();
+            a.play().catch((e) => console.warn('Jukebox play:', e?.message || e));
+            return true;
+        } catch (e) {
+            console.warn('Jukebox failed:', e);
+            return false;
+        }
     }
 
     setBgmVolume(v) {

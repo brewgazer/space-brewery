@@ -686,6 +686,13 @@ export class Player {
                 }
                 return;
             }
+            if (gs.jukeboxOpen) {
+                gs.paused = false;
+                if (this.isLocked) {
+                    gs.jukeboxOpen = false;
+                }
+                return;
+            }
             gs.paused = !this.isLocked && gs.started;
         });
 
@@ -740,6 +747,7 @@ export class Player {
             const gs = window.gameState;
             if (!gs?.started || gs.paused) return;
             if (gs.recipeShopOpen) return;
+            if (gs.jukeboxOpen) return;
             // Don't swing while mid-gesture (pour, grab, taunt, etc.) —
             // those one-shots also set `_suppressLocoAnim`. During an active
             // punch combo we *do* want clicks to pass through so the second
@@ -769,6 +777,7 @@ export class Player {
                     // pointer isn't locked, so check for gameplay focus here.
                     if (!gs?.started) break;
                     if (gs.recipeShopOpen) break;
+                    if (gs.jukeboxOpen) break;
                     if (this.jump()) e.preventDefault();
                     break;
                 }

@@ -485,6 +485,7 @@ export function applySaveSnapshot(saved, ctx) {
     applyDryStorage(world, saved);
 
     gameState.recipeShopOpen = false;
+    gameState.jukeboxOpen = false;
 
     syncLagerTankRefs({ world, fermentSystem, brewSystem });
 
@@ -519,6 +520,7 @@ export function resetToNewGame(ctx) {
     world.despawnPurchasedFermentersAndTaps?.();
     gameState.dailyCravings = recipeSystem.generateDailyCravings(1, gameState.unlockedRecipeIds);
     gameState.recipeShopOpen = false;
+    gameState.jukeboxOpen = false;
     gameState.currentWave = 0;
     gameState.waveActive = false;
     gameState.waitingForPlayer = false;

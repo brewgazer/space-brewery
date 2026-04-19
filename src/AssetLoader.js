@@ -325,6 +325,18 @@ export async function loadGameAssets(renderer, scene) {
         console.warn('ufo_modern_chandelier glTF missing — taproom keeps pendant lights.', e?.message || e);
     }
 
+    let jukeboxTemplate = null;
+    try {
+        const jukeGltf = await withTimeout(
+            loader.loadAsync('assets/models/jukebox.glb'),
+            45000,
+            'jukebox.glb'
+        );
+        jukeboxTemplate = jukeGltf.scene;
+    } catch (e) {
+        console.warn('jukebox.glb missing — taproom uses procedural jukebox.', e?.message || e);
+    }
+
     let kegTemplate = null;
     try {
         const kegGltf = await withTimeout(
@@ -404,6 +416,7 @@ export async function loadGameAssets(renderer, scene) {
         lagerTankTemplate,
         recipeTerminalTemplate,
         taproomChandelierTemplate,
+        jukeboxTemplate,
         kegTemplate,
         grainBucketTemplate,
         grainMillTemplate,

@@ -2733,44 +2733,11 @@ export class World {
             this.scene.add(holoGroup);
         }
 
-        // Chalkboard "brew manifest" — mounted on the flat dividing wall so it faces into
-        // the taproom (+Z direction).
-        const panelMat = new THREE.MeshStandardMaterial({
-            color: 0x120818,
-            metalness: 0.55,
-            roughness: 0.32,
-            emissive: 0x4a2848,
-            emissiveIntensity: 0.45,
-        });
-        const frameMatDeco = new THREE.MeshStandardMaterial({
-            color: 0x483858,
-            emissive: 0xff4488,
-            emissiveIntensity: 0.28,
-            metalness: 0.65,
-            roughness: 0.36,
-        });
-        {
-            // menuPanel is thin-on-X and long-on-Z by default; rotate −90° around Y so its
-            // long axis runs along world X (along the divider wall) and its broad face normal
-            // points world +Z (into the taproom).
-            const chalkGroup = new THREE.Group();
-            chalkGroup.position.set(-10, 2.4, this._taproom.dividerZ + 0.18);
-            chalkGroup.rotation.y = -Math.PI / 2;
-
-            const chalk = new THREE.Mesh(g.menuPanel, panelMat);
-            chalk.position.x = -0.04; // recessed toward the wall (−Z world) so the frame front is flush
-            chalkGroup.add(chalk);
-
-            const chalkFrame = new THREE.Mesh(g.menuFrame, frameMatDeco);
-            chalkGroup.add(chalkFrame);
-
-            const menuLabel = this._textSprite('BREW MANIFEST', 0xffccff, 0.65);
-            menuLabel.position.x = 0.08; // floats slightly in front of the panel (world +Z)
-            chalkGroup.add(menuLabel);
-
-            chalkGroup.userData._staticScenery = true;
-            this.scene.add(chalkGroup);
-        }
+        // Galactic Jukebox — replaces the old "BREW MANIFEST" chalkboard. Sits against
+        // the divider wall facing +Z (into the taproom) so the player can walk up to it
+        // from the tables. Uses the glTF template when available, otherwise a procedural
+        // cabinet. Hitbox + collider register it as an interactable of type 'jukebox'.
+        this._buildTaproomJukebox(-10, this._taproom.dividerZ + 0.18);
 
         const shadeMat = new THREE.MeshStandardMaterial({
             color: 0x4a4860,
@@ -2952,6 +2919,113 @@ export class World {
         this.scene.add(mat);
 
         this._buildTaproomWallArt();
+    }
+
+    /**
+     * Galactic jukebox cabinet: occupies the spot where the old "BREW MANIFEST"
+     * chalkboard used to hang on the divider wall. We use the glTF template
+     * loaded via AssetLoader when available, otherwise a procedural cabinet so
+     * the spot never reads as empty if the download failed. An invisible hitbox
+     * registers the cabinet as an `interactable` of type `jukebox`, matching
+     * the same pattern used by the recipe terminal and brew stations.
+     *
+     * @param {number} x world-X anchor (feet of cabinet)
+     * @param {number} z world-Z anchor (flush with divider wall + inset)
+     */
+    _buildTaproomJukebox(x, z) {
+        const group = new THREE.Group();
+        group.position.set(x, 0, z);
+
+        let bb = null;
+        const tmpl = this.assets?.jukeboxTemplate;
+        if (tmpl) {
+            const juke = tmpl.clone(true);
+            juke.traverse((o) => {
+                if (o.isMesh) {
+                    o.castShadow = false;
+                    o.receiveShadow = true;
+                }
+            });
+            juke.updateMatrixWorld(true);
+            // Scale so the cabinet is ~1.9 m tall (same order as the brewer
+            // avatar, reads as a proper stand-up jukebox). Source asset ships
+            // at varying units depending on the Sketchfab export, so compute
+            // from its own bounding box rather than hard-coding a scalar.
+            const b0 = new THREE.Box3().setFromObject(juke);
+            const h0 = Math.max(0.001, b0.max.y - b0.min.y);
+            const targetH = 1.9;
+            const s = targetH / h0;
+            juke.scale.setScalar(s);
+            juke.updateMatrixWorld(true);
+            // Recentre feet on y=0 and XZ on the local origin, then rotate so
+            // the cabinet front faces +Z (into the taproom). Sketchfab jukebox
+            // exports typically ship facing -Z, so a 180° Y rotation is
+            // needed; if the glTF already faces +Z the visuals still read
+            // fine from behind and we would just flip in a follow-up.
+            const b1 = new THREE.Box3().setFromObject(juke);
+            juke.position.set(
+                -(b1.min.x + b1.max.x) * 0.5,
+                -b1.min.y,
+                -(b1.min.z + b1.max.z) * 0.5
+            );
+            juke.rotation.y = Math.PI;
+            group.add(juke);
+            group.updateMatrixWorld(true);
+            bb = new THREE.Box3().setFromObject(juke);
+        } else {
+            const cab = new THREE.Mesh(
+                new THREE.BoxGeometry(1.1, 1.9, 0.6),
+                new THREE.MeshStandardMaterial({
+                    color: 0x3a2048,
+                    emissive: 0xaa3388,
+                    emissiveIntensity: 0.35,
+                    metalness: 0.55,
+                    roughness: 0.35,
+                })
+            );
+            cab.position.y = 0.95;
+            group.add(cab);
+            const screen = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.85, 0.45),
+                new THREE.MeshStandardMaterial({
+                    color: 0x08141e,
+                    emissive: 0x66ccff,
+                    emissiveIntensity: 0.6,
+                    roughness: 0.4,
+                })
+            );
+            screen.position.set(0, 1.45, 0.31);
+            group.add(screen);
+            group.updateMatrixWorld(true);
+            bb = new THREE.Box3().setFromObject(group);
+        }
+
+        const label = this._textSprite('JUKEBOX', 0xffccee, 0.42);
+        label.position.set(0, (bb?.max?.y ?? 1.9) + 0.24, 0);
+        group.add(label);
+
+        group.userData._staticScenery = true;
+        this.scene.add(group);
+
+        // Hitbox: wrap the cabinet bounds with a small pad so [E] picks up
+        // even when the player is standing off-centre. Also doubles as a
+        // wall collider so you can't walk into / through the cabinet.
+        const pad = 0.18;
+        const hitW = Math.max(1.0, (bb.max.x - bb.min.x) + pad);
+        const hitH = Math.max(1.6, (bb.max.y - bb.min.y) + pad);
+        const hitD = Math.max(0.6, (bb.max.z - bb.min.z) + pad);
+        const cx = (bb.min.x + bb.max.x) * 0.5;
+        const cy = (bb.min.y + bb.max.y) * 0.5;
+        const cz = (bb.min.z + bb.max.z) * 0.5;
+        const hitbox = new THREE.Mesh(
+            new THREE.BoxGeometry(hitW, hitH, hitD),
+            new THREE.MeshBasicMaterial({ visible: false })
+        );
+        hitbox.position.set(cx, cy, cz);
+        hitbox.userData = { type: 'jukebox' };
+        this.scene.add(hitbox);
+        this.interactables.push(hitbox);
+        this._addCollider(hitbox);
     }
 
     /**
@@ -3138,8 +3212,7 @@ export class World {
         }
 
         // Divider wall (z = dividerZ) with flat normal facing +Z. Positioned
-        // on the east half so it doesn't crowd the existing BREW MANIFEST
-        // chalkboard at x = -10.
+        // on the east half so it doesn't crowd the jukebox cabinet at x = -10.
         if (posters.astralBrew) {
             const poster = buildPoster(posters.astralBrew);
             poster.position.set(6, 2.15, tap.dividerZ + 0.19);

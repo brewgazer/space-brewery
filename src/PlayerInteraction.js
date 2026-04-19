@@ -37,6 +37,8 @@ export function handleGameplayInteraction(target, ctx) {
         }
     } else if (data.type === 'recipeShop') {
         ui.openRecipeShop();
+    } else if (data.type === 'jukebox') {
+        ui.openJukebox?.();
     } else if (data.type === 'fermenter') {
         fermentSystem.interact(data.index, gameState.player, player);
     } else if (data.type === 'lagerTank') {

@@ -218,6 +218,16 @@ export class UI {
             max-height: 78vh; overflow-y: auto; z-index: 80;
         `, overlay);
 
+        this.elements.jukebox = this._createDiv('jukebox-panel', `
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #fff; font-size: 15px; text-align: left;
+            background: rgba(14,10,28,0.97); border: 2px solid #cc88ff;
+            border-radius: 14px; padding: 22px 26px;
+            display: none; pointer-events: none; min-width: 320px; max-width: min(440px, 94vw);
+            max-height: 78vh; overflow-y: auto; z-index: 80;
+            box-shadow: 0 0 24px rgba(200,120,255,0.35);
+        `, overlay);
+
         // Carrying indicator
         this.elements.carrying = this._createDiv('carrying-indicator', `
             position: absolute; bottom: 30px; left: 30px;
@@ -718,6 +728,8 @@ export class UI {
             }
         } else if (type === 'recipeShop') {
             text = 'Press [E] Supply terminal — recipes & tools';
+        } else if (type === 'jukebox') {
+            text = 'Press [E] Galactic Jukebox — pick a song ($5)';
         } else if (type === 'ingredientBin') {
             if (player.carrying?.type === 'bucket') {
                 const ids = player.carrying.ingredientIds;
@@ -880,6 +892,85 @@ export class UI {
 
     refreshRecipeShopContent() {
         if (this._recipeShopOpen) this._renderRecipeShopContent();
+    }
+
+    // ------------------------------------------------------------------ jukebox
+
+    /**
+     * Fixed price the player pays each time they pick a song from the
+     * jukebox. Cheap enough to use casually but a small money-sink during
+     * the first few days. Matches what the interaction prompt advertises.
+     */
+    static JUKEBOX_COST = 5;
+
+    isJukeboxOpen() {
+        return this._jukeboxOpen === true;
+    }
+
+    /**
+     * Open the jukebox selection panel. Mirrors the recipe-shop open flow so
+     * the same pause-overlay gating works — pointer lock is released, the
+     * panel becomes click-through, and the gameState flag pins `paused=false`
+     * until pointer lock returns.
+     */
+    openJukebox() {
+        this._jukeboxOpen = true;
+        this.gameState.jukeboxOpen = true;
+        this._renderJukeboxContent();
+        this.elements.jukebox.style.display = 'block';
+        this.elements.jukebox.style.pointerEvents = 'auto';
+        try {
+            document.exitPointerLock?.();
+        } catch (_) {
+            /* ignore */
+        }
+    }
+
+    closeJukebox(clearPauseFlagNow = false) {
+        this._jukeboxOpen = false;
+        this.elements.jukebox.style.display = 'none';
+        this.elements.jukebox.style.pointerEvents = 'none';
+        if (clearPauseFlagNow || this.gameState._pointerLockFailed) {
+            this.gameState.jukeboxOpen = false;
+        }
+    }
+
+    refreshJukeboxContent() {
+        if (this._jukeboxOpen) this._renderJukeboxContent();
+    }
+
+    _renderJukeboxContent() {
+        const cost = UI.JUKEBOX_COST;
+        const money = this.gameState.player?.money ?? 0;
+        const canAfford = money >= cost;
+        const titles = [
+            'Track 1 — Neon Fermenter',
+            'Track 2 — Orbital Hop Lounge',
+            'Track 3 — Graviton Groove',
+            'Track 4 — Starlight Pils',
+        ];
+        let html =
+            '<div style="font-size:20px;color:#e6b9ff;margin-bottom:6px;">Galactic Jukebox</div>' +
+            '<div style="color:#aab;font-size:13px;margin-bottom:12px;line-height:1.45;">' +
+            `Pick a track — <span style="color:#ffd700;">$${cost}</span> per play. After your pick ` +
+            'finishes, the cabinet shuffles the full set on repeat.</div>';
+        if (!canAfford) {
+            html +=
+                '<div style="color:#ff8888;font-size:13px;margin-bottom:10px;">' +
+                `You need $${cost} to queue a track. Current: $${money}.</div>`;
+        }
+        titles.forEach((label, i) => {
+            html +=
+                `<div style="margin:8px 0;padding:6px 0;border-bottom:1px solid rgba(140,100,180,0.25);">` +
+                `<span style="color:#ffd700;font-weight:bold;">[${i + 1}]</span> ` +
+                `<span style="color:#fff;">${label}</span> ` +
+                `<span style="color:${canAfford ? '#b8f' : '#666'};">$${cost}</span></div>`;
+        });
+        html +=
+            '<div style="color:#888;font-size:12px;margin-top:14px;">' +
+            '[Esc] or [Tab] to close' +
+            '</div>';
+        this.elements.jukebox.innerHTML = html;
     }
 
     _renderRecipeShopContent() {

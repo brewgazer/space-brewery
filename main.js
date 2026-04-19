@@ -92,6 +92,8 @@ const gameState = {
     supplyTerminalView: 'home',
     /** True while recipe kiosk is open — avoids treating pointer unlock as pause. */
     recipeShopOpen: false,
+    /** True while the galactic jukebox panel is open (same pause-guard role as recipeShopOpen). */
+    jukeboxOpen: false,
 };
 window.gameState = gameState;
 
@@ -356,6 +358,40 @@ function tryBuyRecipe(recipeId) {
     audioSystem.playCashRegister();
     ui.showNotification(`Unlocked recipe: ${r.name} (-$${cost})`, 'rgba(30,90,50,0.92)', 2200);
     ui.refreshRecipeShopContent();
+    return true;
+}
+
+const JUKEBOX_COST = 5;
+
+/**
+ * Queue a jukebox track. Deducts $5, plays the chosen track next, and the
+ * audio system resumes random shuffle once the track ends (no further
+ * hook needed). Index is 0-based (matches UI labels "Track 1" at idx 0).
+ */
+function tryPlayJukeboxTrack(trackIdx) {
+    if (!Number.isInteger(trackIdx) || trackIdx < 0 || trackIdx > 3) return false;
+    if (gameState.player.money < JUKEBOX_COST) {
+        audioSystem.playError();
+        ui.showNotification(
+            `Need $${JUKEBOX_COST} for the jukebox`,
+            'rgba(120,40,40,0.92)',
+            2000
+        );
+        return false;
+    }
+    const ok = audioSystem.playJukeboxTrack(trackIdx);
+    if (!ok) {
+        audioSystem.playError();
+        return false;
+    }
+    gameState.player.money -= JUKEBOX_COST;
+    audioSystem.playCashRegister();
+    ui.showNotification(
+        `Jukebox: Track ${trackIdx + 1} (-$${JUKEBOX_COST})`,
+        'rgba(70,35,110,0.94)',
+        2000
+    );
+    ui.refreshJukeboxContent();
     return true;
 }
 
@@ -1223,6 +1259,22 @@ const loadingLine = document.getElementById('loading-line');
 
 document.addEventListener('keydown', (e) => {
     if (!gameReady || !gameState.started || gameState.paused) return;
+
+    if (ui.isJukeboxOpen?.()) {
+        if (e.code === 'Escape' || e.code === 'Tab') {
+            ui.closeJukebox();
+            e.preventDefault();
+            player?.lock();
+            return;
+        }
+        if (e.key >= '1' && e.key <= '4' && !e.repeat) {
+            const idx = parseInt(e.key, 10) - 1;
+            tryPlayJukeboxTrack(idx);
+            e.preventDefault();
+            return;
+        }
+        return;
+    }
 
     if (ui.isRecipeShopOpen()) {
         if (e.code === 'Escape' || e.code === 'Tab') {
