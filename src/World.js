@@ -2968,7 +2968,7 @@ export class World {
                 -b1.min.y,
                 -(b1.min.z + b1.max.z) * 0.5
             );
-            juke.rotation.y = Math.PI;
+            juke.rotation.y = Math.PI / 2;
             group.add(juke);
             group.updateMatrixWorld(true);
             bb = new THREE.Box3().setFromObject(juke);
