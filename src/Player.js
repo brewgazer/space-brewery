@@ -80,6 +80,31 @@ export class Player {
         this._suppressLocoAnim = false;
         this._lastYellTime = -1e9;
 
+        /**
+         * Vertical hop (space bar). `_jumpY` is additive height above the ground,
+         * applied to the avatar root each frame. `_basePatronY` captures the
+         * brewer template's foot-aligned Y offset so we can return to it after
+         * landing without drifting.
+         */
+        this._jumpY = 0;
+        this._jumpVel = 0;
+        this._isJumping = false;
+        this._basePatronY = 0;
+        this._jumpSpeed = 5.2;
+        this._jumpGravity = 14.0;
+
+        /**
+         * Punch combo state. LMB plays `punch1`; a second LMB inside
+         * `_punchComboWindow` plays `punch2` and, if the swing connects, flings
+         * the victim backward.
+         */
+        this._punchStage = 0;            // 0 idle, 1 after punch1, 2 after punch2
+        this._lastPunchAt = -1e9;
+        this._punchComboWindow = 0.55;
+        this._punchCooldown = 0.22;      // min time between swings
+        this._punchLockUntil = 0;        // while <= now, movement anims suppressed
+        this.onPunchLanded = null;       // main.js installs hit-detection callback
+
         this._setupPointerLock();
         this._setupKeyboard();
     }
@@ -212,7 +237,14 @@ export class Player {
             pour: useBrewer ? brew.clips?.pour || null : null,
             grabMix: useBrewer ? brew.clips?.grabMix || null : null,
             grabWort: useBrewer ? brew.clips?.grabWort || null : null,
+            jump: useBrewer ? brew.clips?.jump || null : null,
+            punch1: useBrewer ? brew.clips?.punch1 || null : null,
+            punch2: useBrewer ? brew.clips?.punch2 || null : null,
         };
+        this._basePatronY = root.position.y;
+        this._jumpY = 0;
+        this._jumpVel = 0;
+        this._isJumping = false;
         this._suppressLocoAnim = false;
 
         if (this._clips.idle) {
@@ -275,6 +307,74 @@ export class Player {
 
     getLastYellTime() {
         return this._lastYellTime;
+    }
+
+    /**
+     * Begin a vertical hop. Ignored if already airborne or if the patron hasn't
+     * been spawned yet (menus / first-person selection). Plays the `jump` clip
+     * as a one-shot while the physics runs in `update()`.
+     */
+    jump() {
+        if (!this._thirdPerson || !this.patronRoot) return false;
+        if (this._isJumping) return false;
+        this._isJumping = true;
+        this._jumpVel = this._jumpSpeed;
+        // Play the jump clip as a transient overlay; crucially we do NOT set
+        // `_suppressLocoAnim` here, because the player should still be able to
+        // run-jump. The update loop will naturally flip back to walk/idle
+        // when the clip ends (crossfades handle blending).
+        const clip = this._clips?.jump;
+        if (clip && this.mixer) {
+            const next = this.mixer.clipAction(clip);
+            next.reset();
+            next.setLoop(THREE.LoopOnce, 1);
+            next.clampWhenFinished = false;
+            next.fadeIn(0.08).play();
+            if (this._curAnimAction && this._curAnimAction !== next) {
+                this._curAnimAction.fadeOut(0.08);
+            }
+            this._curAnimAction = next;
+        }
+        return true;
+    }
+
+    /**
+     * Trigger a punch. The first swing always plays `punch1`. A second swing
+     * within `_punchComboWindow` plays `punch2`, which is the "finisher" — if
+     * it lands, `onPunchLanded` is invoked so the scene can send the victim
+     * flying. Consecutive clicks past that reset to punch1.
+     */
+    punch() {
+        if (!this._thirdPerson || !this.patronRoot || !this.mixer) return false;
+        const now = performance.now() * 0.001;
+        if (now - this._lastPunchAt < this._punchCooldown) return false;
+
+        const comboReady =
+            this._punchStage === 1 && now - this._lastPunchAt <= this._punchComboWindow;
+        const kind = comboReady ? 'punch2' : 'punch1';
+        const clip = this._clips?.[kind];
+        if (!clip) return false;
+
+        const ok = this._playBrewerOneShotClip(clip);
+        if (!ok) return false;
+        this._lastPunchAt = now;
+        this._punchLockUntil = now + Math.max(0.22, clip.duration * 0.9);
+        this._punchStage = comboReady ? 0 : 1;
+
+        // Combo finisher lands ~40% through the clip (fist contact frame-ish);
+        // defer so the animation reads as hitting first, then the victim flies.
+        if (comboReady && typeof this.onPunchLanded === 'function') {
+            const delayMs = Math.max(60, clip.duration * 400);
+            const cb = this.onPunchLanded;
+            setTimeout(() => {
+                try { cb(this); } catch (err) { console.warn('punch-landed cb', err); }
+            }, delayMs);
+        }
+        return true;
+    }
+
+    isPunching() {
+        return performance.now() * 0.001 < this._punchLockUntil;
     }
 
     clearAvatarForMenu() {
@@ -488,6 +588,21 @@ export class Player {
         document.addEventListener('mouseup', () => {
             this._dragLookActive = false;
         });
+
+        // Left-click = punch. Only while pointer is locked (actively playing),
+        // so clicking menu buttons or the canvas to re-acquire lock doesn't
+        // fire a phantom swing.
+        document.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (!this.isLocked) return;
+            const gs = window.gameState;
+            if (!gs?.started || gs.paused) return;
+            if (gs.recipeShopOpen) return;
+            // Don't swing while mid-gesture (pour, grab, taunt, etc.);
+            // allow the next swing once the active punch clip releases.
+            if (this._suppressLocoAnim && !this.isPunching()) return;
+            this.punch();
+        });
     }
 
     _setupKeyboard() {
@@ -501,6 +616,18 @@ export class Player {
                 case 'ShiftRight':
                     this.sprintKey = true;
                     break;
+                case 'Space': {
+                    if (e.repeat) break;
+                    const gs = window.gameState;
+                    // Don't hijack space while a modal UI is open (recipe / keg
+                    // pickers use it occasionally in some browsers) — the
+                    // moveForward etc. guards already block movement when
+                    // pointer isn't locked, so check for gameplay focus here.
+                    if (!gs?.started) break;
+                    if (gs.recipeShopOpen) break;
+                    if (this.jump()) e.preventDefault();
+                    break;
+                }
             }
         });
         document.addEventListener('keyup', (e) => {
@@ -612,10 +739,20 @@ export class Player {
             }
         }
 
+        if (this._isJumping) {
+            this._jumpVel -= this._jumpGravity * delta;
+            this._jumpY += this._jumpVel * delta;
+            if (this._jumpY <= 0) {
+                this._jumpY = 0;
+                this._jumpVel = 0;
+                this._isJumping = false;
+            }
+        }
+
         if (this._thirdPerson && this.patronRoot) {
             this.patronRoot.position.set(
                 this.avatarPos.x,
-                this.patronRoot.position.y,
+                this._basePatronY + this._jumpY,
                 this.avatarPos.z
             );
             const moving = direction.lengthSq() > 0.001;

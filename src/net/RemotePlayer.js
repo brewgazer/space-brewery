@@ -74,6 +74,19 @@ export class RemotePlayer {
         this._currentPos = this.targetPos.clone();
         this._currentYaw = this.targetYaw;
 
+        /**
+         * Local-only knockback overlay applied when the local player lands a
+         * combo punch on this avatar. We add an offset to the rendered
+         * position for ~`_knockTimeMax` seconds; incoming network state keeps
+         * updating `targetPos` underneath, so once the effect ends the avatar
+         * snaps back to its authoritative position without a jarring teleport
+         * (the network tick usually catches up within ~80ms).
+         */
+        this._knockOffset = new THREE.Vector3();
+        this._knockVel = new THREE.Vector3();
+        this._knockTime = 0;
+        this._knockTimeMax = 0;
+
         this.root = null;
         this.mixer = null;
         this._clips = null;
@@ -103,6 +116,7 @@ export class RemotePlayer {
         root.rotation.y = this.targetYaw + this._walkYawOffset;
         scene.add(root);
         this.root = root;
+        this._baseY = root.position.y;
 
         this.mixer = new THREE.AnimationMixer(root);
         this._clips = {
@@ -158,6 +172,20 @@ export class RemotePlayer {
         this._curAction = next;
     }
 
+    /**
+     * Apply a local-only knockback visual. Direction is horizontal (dirX,dirZ);
+     * a fixed upward component is added so the victim actually arcs.
+     */
+    applyKnockback(dirX, dirZ, impulseXZ = 8.5) {
+        const len = Math.hypot(dirX, dirZ) || 1;
+        const nx = dirX / len;
+        const nz = dirZ / len;
+        this._knockVel.set(nx * impulseXZ, 5.0, nz * impulseXZ);
+        this._knockOffset.set(0, 0, 0);
+        this._knockTime = 0;
+        this._knockTimeMax = 1.2;
+    }
+
     update(delta) {
         if (!this.root) return;
         const t = 1 - Math.exp(-LERP_POS * delta);
@@ -170,15 +198,47 @@ export class RemotePlayer {
         const ty = 1 - Math.exp(-LERP_YAW * delta);
         this._currentYaw += dy * ty;
 
-        this.root.position.set(this._currentPos.x, this.root.position.y, this._currentPos.z);
+        // Advance knockback offset. Horizontal offset is added to the lerped
+        // position; vertical offset is a simple gravity arc. Once the timer
+        // expires we fade the offset back to zero so the incoming network
+        // state retakes control without a visible snap.
+        if (this._knockTimeMax > 0) {
+            this._knockTime += delta;
+            this._knockVel.y -= 14 * delta;
+            this._knockOffset.x += this._knockVel.x * delta;
+            this._knockOffset.z += this._knockVel.z * delta;
+            this._knockOffset.y = Math.max(
+                0,
+                this._knockOffset.y + this._knockVel.y * delta
+            );
+            if (this._knockOffset.y === 0 && this._knockVel.y < 0) {
+                this._knockVel.y = 0; // landed
+            }
+            if (this._knockTime >= this._knockTimeMax) {
+                const fade = Math.max(0, 1 - (this._knockTime - this._knockTimeMax) * 3);
+                this._knockOffset.x *= fade;
+                this._knockOffset.z *= fade;
+                if (fade <= 0) {
+                    this._knockTimeMax = 0;
+                    this._knockOffset.set(0, 0, 0);
+                    this._knockVel.set(0, 0, 0);
+                }
+            }
+        }
+
+        this.root.position.set(
+            this._currentPos.x + this._knockOffset.x,
+            this._baseY + this._knockOffset.y,
+            this._currentPos.z + this._knockOffset.z
+        );
         this.root.rotation.y = this._currentYaw + this._walkYawOffset;
         this.mixer?.update(delta);
 
         if (this._nameSprite) {
             this._nameSprite.position.set(
-                this._currentPos.x,
-                this._nameTagY,
-                this._currentPos.z
+                this._currentPos.x + this._knockOffset.x,
+                this._nameTagY + this._knockOffset.y,
+                this._currentPos.z + this._knockOffset.z
             );
         }
     }

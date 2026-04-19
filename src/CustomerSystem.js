@@ -560,6 +560,26 @@ export class CustomerSystem {
                 }
             }
 
+            if (c.state === 'flying') {
+                const v = c._vel;
+                v.y -= 14 * delta;
+                c.group.position.x += v.x * delta;
+                c.group.position.y += v.y * delta;
+                c.group.position.z += v.z * delta;
+                c._flyTime += delta;
+                // Slight spin during the tumble — sells the impact.
+                c.group.rotation.y += delta * 6.0;
+                // Stop once we touch the ground again, or fail-safe after a
+                // couple of seconds so an oddly-angled launch doesn't leave a
+                // body frozen mid-air.
+                if (c.group.position.y <= 0 || c._flyTime >= c._flyMaxTime) {
+                    c.group.position.y = 0;
+                    c.state = 'leaving';
+                    c.group.rotation.y = Math.atan2(v.x, v.z);
+                    if (c.mixer && c.clips.walk) this._crossfadeTo(c, c.clips.walk, 0.12);
+                }
+            }
+
             if (c.state === 'leaving') {
                 const dir = this._vDir.subVectors(this._vExit.set(0, 0, 24), c.group.position);
                 const dist = dir.length();
@@ -580,6 +600,67 @@ export class CustomerSystem {
                 }
             }
         }
+    }
+
+    /**
+     * Launch a customer backward (combo-punch finisher). Drops them into a
+     * ballistic 'flying' state — they arc across the room, land, and then
+     * leave. `impulseXZ` is the horizontal velocity applied at contact; we add
+     * a fixed vertical kick so the victim actually lifts off the floor.
+     *
+     * Returns false if the customer was already leaving / flying so callers
+     * can skip a missed swing cheaply.
+     */
+    applyKnockback(customer, dirX, dirZ, impulseXZ = 8.5) {
+        if (!customer) return false;
+        if (customer.state === 'flying' || customer.state === 'leaving') return false;
+        const len = Math.hypot(dirX, dirZ) || 1;
+        const nx = dirX / len;
+        const nz = dirZ / len;
+        customer._vel = {
+            x: nx * impulseXZ,
+            y: 5.2,
+            z: nz * impulseXZ,
+        };
+        customer._flyTime = 0;
+        customer._flyMaxTime = 2.5;
+        customer.state = 'flying';
+        customer.bubble.visible = false;
+        customer.pBarFill.visible = false;
+        this._releaseTableSeat(customer.homeSeat);
+        customer.homeSeat = null;
+        // A yelp voice line sells the hit if the patron had one queued.
+        try { this.audio.playCustomerVoiceLeavingAngry?.(); } catch (_) { /* ignore */ }
+        // Stop the looping locomotion clip so they don't keep "walking" mid-air.
+        if (customer.mixer && customer._curAction) {
+            customer._curAction.fadeOut(0.1);
+            customer._curAction = null;
+        }
+        return true;
+    }
+
+    /** Nearest waiting/seated customer in a cone in front of the player. */
+    findPunchTarget(player, maxDist = 2.4, minDot = 0.55) {
+        if (!player?.avatarPos || !player.getFacingXZ) return null;
+        const forward = this._vExit;
+        player.getFacingXZ(forward);
+        if (forward.lengthSq() < 1e-6) return null;
+        forward.normalize();
+        const px = player.avatarPos.x;
+        const pz = player.avatarPos.z;
+        let best = null;
+        let bestD = 1e9;
+        for (const c of this.customers) {
+            if (c.state === 'flying' || c.state === 'leaving') continue;
+            const dx = c.group.position.x - px;
+            const dz = c.group.position.z - pz;
+            const d = Math.hypot(dx, dz);
+            if (d > maxDist || d < 0.1) continue;
+            const dot = (forward.x * dx + forward.z * dz) / d;
+            if (dot < minDot) continue;
+            if (d < bestD) { bestD = d; best = c; }
+        }
+        return best;
     }
 
     tryKickRowdyAfterPointing(player) {

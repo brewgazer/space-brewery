@@ -148,12 +148,15 @@ export async function loadBrewerGlbAssets(withTimeout) {
         (await clipForRig(loader, withTimeout, 'player_brewer_walking.glb', root, 'walk')) || idle;
     if (!walk) walk = idle;
 
-    const [point, yell, pour, grabMix, grabWort] = await Promise.all([
+    const [point, yell, pour, grabMix, grabWort, jump, punch1, punch2] = await Promise.all([
         clipForRig(loader, withTimeout, 'anim_point.glb', root, 'point'),
         clipForRig(loader, withTimeout, 'anim_yell.glb', root, 'yell'),
         clipForRig(loader, withTimeout, 'anim_pour.glb', root, 'pour'),
         clipForRig(loader, withTimeout, 'anim_grab_mix.glb', root, 'grabMix'),
         clipForRig(loader, withTimeout, 'anim_grab_wort.glb', root, 'grabWort'),
+        clipForRig(loader, withTimeout, 'anim_jump.glb', root, 'jump'),
+        clipForRig(loader, withTimeout, 'anim_punch1.glb', root, 'punch1'),
+        clipForRig(loader, withTimeout, 'anim_punch2.glb', root, 'punch2'),
     ]);
 
     root.updateMatrixWorld(true);
@@ -173,6 +176,9 @@ export async function loadBrewerGlbAssets(withTimeout) {
             pour,
             grabMix,
             grabWort,
+            jump,
+            punch1,
+            punch2,
         },
         animations: gltf.animations || [],
         bubbleY,

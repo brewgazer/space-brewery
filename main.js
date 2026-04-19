@@ -1532,6 +1532,47 @@ function bootstrap() {
                 assetBucket,
                 world.tableSeats
             );
+            // Combo-punch finisher: land the 2nd swing → find the nearest
+            // target in front of the player and launch them across the room.
+            // Customers are authoritative locally, so we drive them through
+            // `applyKnockback`. Remote players are authoritative on their own
+            // tab, so we apply a local-only visual shove (their network state
+            // will retake control after the arc fades — see RemotePlayer).
+            player.onPunchLanded = (p) => {
+                if (!p?.avatarPos || !p.getFacingXZ) return;
+                const fwd = new THREE.Vector3();
+                p.getFacingXZ(fwd);
+                if (fwd.lengthSq() < 1e-6) return;
+                fwd.normalize();
+                const px = p.avatarPos.x;
+                const pz = p.avatarPos.z;
+
+                const customerHit = customerSystem?.findPunchTarget?.(p, 2.5, 0.5);
+                if (customerHit) {
+                    customerSystem.applyKnockback(customerHit, fwd.x, fwd.z, 9.0);
+                    return;
+                }
+                // No customer — check visible remote players within the same
+                // cone. Iterate the map in insertion order; there are at most
+                // MAX_PLAYERS_PER_SERVER - 1 (= 3) entries so this is cheap.
+                let bestRp = null;
+                let bestD = 1e9;
+                for (const rp of remotePlayers.values()) {
+                    const rx = rp?.targetPos?.x;
+                    const rz = rp?.targetPos?.z;
+                    if (rx == null || rz == null) continue;
+                    const dx = rx - px;
+                    const dz = rz - pz;
+                    const d = Math.hypot(dx, dz);
+                    if (d > 2.6 || d < 0.1) continue;
+                    const dot = (fwd.x * dx + fwd.z * dz) / d;
+                    if (dot < 0.5) continue;
+                    if (d < bestD) { bestD = d; bestRp = rp; }
+                }
+                if (bestRp) {
+                    bestRp.applyKnockback(fwd.x, fwd.z, 9.0);
+                }
+            };
             waveManager = new WaveManager(gameState, customerSystem, recipeSystem);
             upgradeSystem = new UpgradeSystem(world, gameState, audioSystem, ui);
             placementSystem = new PlacementSystem({
