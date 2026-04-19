@@ -56,12 +56,19 @@ export class Player {
         this.isLocked = false;
         /**
          * Baseline mouse sensitivity (radians per device-pixel of movement).
-         * Runtime look-speed is `sensitivity * sensitivityMultiplier`; the
-         * settings slider only ever writes the multiplier so the baseline
-         * feel at 1.0× stays a known-good value.
+         *
+         * `sensitivityMultiplier` is the raw *slider position* (1…10), not a
+         * direct multiplier. Runtime look-speed is
+         * `sensitivity * 0.2 * sensitivityMultiplier`, which puts the
+         * slider's midpoint (5) at the original feel (1.0×), lets players
+         * slow the camera down to 0.2× at position 1, and speeds it up to
+         * 2.0× at position 10. That asymmetry around the midpoint is
+         * deliberate — people who want slower aim have a much wider range
+         * to dial in than people who want faster aim, which matches the
+         * request.
          */
         this.sensitivity = 0.002;
-        this.sensitivityMultiplier = 1.0;
+        this.sensitivityMultiplier = 5;
         try {
             const raw = localStorage.getItem('brewery_mouse_sensitivity');
             if (raw != null) {
@@ -455,9 +462,14 @@ export class Player {
         return performance.now() * 0.001 < this._punchLockUntil;
     }
 
-    /** Settings slider writes here (1.0 … 10.0). Persisted to localStorage. */
+    /**
+     * Settings slider writes here (1 … 10, default 5 = baseline feel).
+     * The effective look multiplier is `0.2 * value`, so the slider spans
+     * 0.2× (barely moving) through 1.0× (original feel, at 5) up to 2.0×
+     * (snappy). Persisted to localStorage.
+     */
     setSensitivityMultiplier(v) {
-        const clamped = Math.max(1, Math.min(10, Number(v) || 1));
+        const clamped = Math.max(1, Math.min(10, Number(v) || 5));
         this.sensitivityMultiplier = clamped;
         try {
             localStorage.setItem('brewery_mouse_sensitivity', String(clamped));
@@ -648,7 +660,7 @@ export class Player {
                 this.isLocked || (this._dragLookActive && gs?._pointerLockFailed && gs?.started);
             if (!canLook) return;
 
-            const look = this.sensitivity * this.sensitivityMultiplier;
+            const look = this.sensitivity * 0.2 * this.sensitivityMultiplier;
             if (this._thirdPerson) {
                 this.euler.y -= e.movementX * look;
                 const pitchSign = this.invertThirdPersonPitch ? 1 : -1;

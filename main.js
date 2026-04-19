@@ -661,10 +661,12 @@ function wireStartMenuAndSettings() {
         if (!startSfx) return;
         audioSystem.setSfxVolume(Number(startSfx.value) / 100);
     };
+    // Slider 1…10 → effective look multiplier 0.2×…2.0× (midpoint 5 = 1.0×).
+    const sensLabelFor = (v) => `${(v * 0.2).toFixed(1)}×`;
     const onStartSens = () => {
         if (!startSens) return;
         const v = Number(startSens.value);
-        if (startSensVal) startSensVal.textContent = `${v.toFixed(1)}×`;
+        if (startSensVal) startSensVal.textContent = sensLabelFor(v);
         player?.setSensitivityMultiplier?.(v);
         // Keep the value cached even before the player is instantiated so the
         // in-game pause panel can mirror it.
@@ -677,7 +679,7 @@ function wireStartMenuAndSettings() {
                 startSens.value = String(Math.max(1, Math.min(10, parseFloat(raw))));
             }
         } catch (_) { /* ignore */ }
-        if (startSensVal) startSensVal.textContent = `${Number(startSens.value).toFixed(1)}×`;
+        if (startSensVal) startSensVal.textContent = sensLabelFor(Number(startSens.value));
     }
     startBgm?.addEventListener('input', onStartBgm);
     startSfx?.addEventListener('input', onStartSfx);

@@ -96,20 +96,22 @@ export class UI {
             this.elements.pauseSfx.value = String(Math.round(this.audio.sfxVolume * 100));
         }
         if (this.elements.pauseSens) {
-            let v = 1.0;
+            let sliderVal = 5;
             if (this.player && typeof this.player.sensitivityMultiplier === 'number') {
-                v = this.player.sensitivityMultiplier;
+                sliderVal = this.player.sensitivityMultiplier;
             } else {
                 try {
                     const raw = localStorage.getItem('brewery_mouse_sensitivity');
                     if (raw != null && !Number.isNaN(parseFloat(raw))) {
-                        v = Math.max(1, Math.min(10, parseFloat(raw)));
+                        sliderVal = Math.max(1, Math.min(10, parseFloat(raw)));
                     }
                 } catch (_) { /* ignore */ }
             }
-            this.elements.pauseSens.value = String(v);
+            this.elements.pauseSens.value = String(sliderVal);
             if (this.elements.pauseSensLabel) {
-                this.elements.pauseSensLabel.textContent = `Mouse sensitivity (${v.toFixed(1)}×)`;
+                // Slider position → display multiplier (0.2×…2.0×, 5 = 1.0×).
+                this.elements.pauseSensLabel.textContent =
+                    `Mouse sensitivity (${(sliderVal * 0.2).toFixed(1)}×)`;
             }
         }
     }
@@ -160,7 +162,8 @@ export class UI {
             if (!this.elements.pauseSens) return;
             const v = Number(this.elements.pauseSens.value);
             if (this.elements.pauseSensLabel) {
-                this.elements.pauseSensLabel.textContent = `Mouse sensitivity (${v.toFixed(1)}×)`;
+                this.elements.pauseSensLabel.textContent =
+                    `Mouse sensitivity (${(v * 0.2).toFixed(1)}×)`;
             }
             if (this.player?.setSensitivityMultiplier) {
                 this.player.setSensitivityMultiplier(v);
