@@ -539,53 +539,33 @@ export class World {
             makeWall(cx, cz, len + 0.04, 0.3, yaw, true, taproomWallMat);
         }
 
-        // Short return walls on either side of the south entrance — mask the curved gap
-        // from behind & give the doorway a "wall thickness" feel. They sit at
-        // the end of the taproom arc, so they reuse the obsidian material to
-        // keep the entrance jamb continuous with the curved wall.
-        const entranceFrameMat = taproomWallMat;
-        const entreturnW = 0.35;
-        const entreturnD = 1.6;
-        const entreturnX = 1.9;
-        const entreturnCz = DIVIDER_Z + TAP_RZ - 0.2;
-        const eFrameL = new THREE.Mesh(new THREE.BoxGeometry(entreturnW, wallH, entreturnD), entranceFrameMat);
-        eFrameL.position.set(-entreturnX, wallH / 2, entreturnCz);
-        this.scene.add(eFrameL);
-        this._staticEnvMeshes.push(eFrameL);
-        this._addCollider(eFrameL);
-        const eFrameR = new THREE.Mesh(new THREE.BoxGeometry(entreturnW, wallH, entreturnD), entranceFrameMat);
-        eFrameR.position.set(entreturnX, wallH / 2, entreturnCz);
-        this.scene.add(eFrameR);
-        this._staticEnvMeshes.push(eFrameR);
-        this._addCollider(eFrameR);
-
-        // Obsidian filler panels flanking the portal — the curved-arc entrance
-        // gap is ~6.5 m wide but the portal door is only ~2 m, so without
-        // these you could see space on both sides of the portal. These panels
-        // run along the wall line (z ≈ apex) from the portal edge outward to
-        // where the arc resumes, closing the outer openings while leaving a
-        // ~2 m center strip open for the portal itself.
-        const portalHalfOpening = 1.0; // half-width of the center slot kept open
-        const arcEndX = 3.2;           // ~where the arc resumes on each side
-        const fillerW = Math.max(0.05, arcEndX - portalHalfOpening); // ≈ 2.2 m
-        const fillerCx = (portalHalfOpening + arcEndX) * 0.5;        // ≈ 2.1 m
-        const fillerCz = DIVIDER_Z + TAP_RZ - 0.02;                  // 2 cm in from apex
-        const fillerL = new THREE.Mesh(
-            new THREE.BoxGeometry(fillerW, wallH, 0.3),
-            taproomWallMat
-        );
-        fillerL.position.set(-fillerCx, wallH / 2, fillerCz);
-        this.scene.add(fillerL);
-        this._staticEnvMeshes.push(fillerL);
-        this._addCollider(fillerL);
-        const fillerR = new THREE.Mesh(
-            new THREE.BoxGeometry(fillerW, wallH, 0.3),
-            taproomWallMat
-        );
-        fillerR.position.set(fillerCx, wallH / 2, fillerCz);
-        this.scene.add(fillerR);
-        this._staticEnvMeshes.push(fillerR);
-        this._addCollider(fillerR);
+        // Fine-grained arc segments that fill the entrance gap right up to
+        // the portal's edge. Uses the same half-ellipse parameterization as
+        // the main arc loop above, so every piece stays tangent to the wall
+        // curve — no perpendicular jambs, no triangular seams. Only segments
+        // whose mid-x falls inside the portal slot are omitted.
+        const PORTAL_HALF_WIDTH = 0.85; // keep this much clear around x=0 for the door
+        const fineT0 = Math.PI * (0.5 - ENTRANCE_GAP_HALF); // start of the big gap
+        const fineT1 = Math.PI * (0.5 + ENTRANCE_GAP_HALF); // end of the big gap
+        const FINE_SEGMENTS = 28;
+        for (let i = 0; i < FINE_SEGMENTS; i++) {
+            const t0 = fineT0 + (i * (fineT1 - fineT0)) / FINE_SEGMENTS;
+            const t1 = fineT0 + ((i + 1) * (fineT1 - fineT0)) / FINE_SEGMENTS;
+            const tMid = (t0 + t1) * 0.5;
+            const xMid = TAP_RX * Math.cos(tMid);
+            if (Math.abs(xMid) < PORTAL_HALF_WIDTH) continue;
+            const x0 = TAP_RX * Math.cos(t0);
+            const z0 = DIVIDER_Z + TAP_RZ * Math.sin(t0);
+            const x1 = TAP_RX * Math.cos(t1);
+            const z1 = DIVIDER_Z + TAP_RZ * Math.sin(t1);
+            const cx = (x0 + x1) * 0.5;
+            const cz = (z0 + z1) * 0.5;
+            const dx = x1 - x0;
+            const dz = z1 - z0;
+            const len = Math.hypot(dx, dz);
+            const yaw = Math.atan2(-dz, dx);
+            makeWall(cx, cz, len + 0.04, 0.3, yaw, true, taproomWallMat);
+        }
 
         const brewTex = this.assets.textures?.breweryFloor;
         const bfMat = brewTex
