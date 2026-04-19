@@ -391,6 +391,21 @@ export async function loadGameAssets(renderer, scene) {
         console.warn('jukebox.glb missing — taproom uses procedural jukebox.', e?.message || e);
     }
 
+    let portalDoorTemplate = null;
+    try {
+        const portalGltf = await withTimeout(
+            loader.loadAsync('assets/models/portal_door.glb'),
+            45000,
+            'portal_door.glb'
+        );
+        portalDoorTemplate = portalGltf.scene;
+    } catch (e) {
+        console.warn(
+            'portal_door.glb missing — taproom entrance falls back to open doorway.',
+            e?.message || e
+        );
+    }
+
     let kegTemplate = null;
     try {
         const kegGltf = await withTimeout(
@@ -471,6 +486,7 @@ export async function loadGameAssets(renderer, scene) {
         recipeTerminalTemplate,
         taproomChandelierTemplate,
         jukeboxTemplate,
+        portalDoorTemplate,
         kegTemplate,
         grainBucketTemplate,
         grainMillTemplate,

@@ -615,10 +615,94 @@ export class World {
         this.scene.add(tf);
         this._staticEnvMeshes.push(tf);
 
+        // Portal door sits in the south entrance gap — customers spawn just
+        // behind it (south, outside the taproom) and walk through it toward
+        // their bar spot, so it reads as the way they "come through" into the
+        // taproom. Placed after the floor but before we freeze static scenery.
+        const portalZ = DIVIDER_Z + TAP_RZ; // apex of the half-ellipse
+        this._buildTaproomEntrancePortal(0, portalZ, wallH);
+        // Expose to CustomerSystem so spawning/leaving uses the portal lane.
+        this.customerPortal = { x: 0, z: portalZ, spawnZ: portalZ + 0.6, exitZ: portalZ + 2.2 };
+
         for (const m of this._staticEnvMeshes) {
             m.updateMatrix();
             m.matrixAutoUpdate = false;
         }
+    }
+
+    /**
+     * Drop the portal GLB into the south entrance gap. Non-colliding so patrons
+     * (and the player) can walk straight through. Auto-scales to ~3 m tall and
+     * orients so its front face is the taproom-interior side (−Z). Falls back
+     * to a simple glowing ring if the GLB didn't ship.
+     */
+    _buildTaproomEntrancePortal(x, z, wallH) {
+        const tpl = this.assets?.portalDoorTemplate;
+        const group = new THREE.Group();
+        group.name = 'TaproomEntrancePortal';
+        if (tpl) {
+            const portal = tpl.clone(true);
+            portal.updateMatrixWorld(true);
+            const bb = new THREE.Box3().setFromObject(portal);
+            const h = bb.max.y - bb.min.y;
+            const targetH = Math.min(3.1, wallH - 0.4);
+            const s = targetH / Math.max(0.001, h);
+            portal.scale.setScalar(s);
+            portal.updateMatrixWorld(true);
+            // Re-measure after scaling and drop its feet to y=0, center on XZ.
+            const bb2 = new THREE.Box3().setFromObject(portal);
+            const cx = (bb2.min.x + bb2.max.x) * 0.5;
+            const cz = (bb2.min.z + bb2.max.z) * 0.5;
+            portal.position.set(-cx, -bb2.min.y, -cz);
+            portal.traverse((o) => {
+                if (o.isMesh) {
+                    o.castShadow = false;
+                    o.receiveShadow = false;
+                    // Nudge any emissive accents a little brighter so the
+                    // gateway actually glows inside the taproom lighting.
+                    const mats = Array.isArray(o.material) ? o.material : [o.material];
+                    for (const m of mats) {
+                        if (m && m.emissive && m.emissiveIntensity != null) {
+                            m.emissiveIntensity = Math.max(m.emissiveIntensity, 0.9);
+                        }
+                    }
+                }
+            });
+            group.add(portal);
+        } else {
+            // Fallback: torus-shaped glowing ring so there's still a portal
+            // visual when the GLB failed to load.
+            const ring = new THREE.Mesh(
+                new THREE.TorusGeometry(1.1, 0.09, 12, 48),
+                new THREE.MeshStandardMaterial({
+                    color: 0x5effd4,
+                    emissive: 0x5effd4,
+                    emissiveIntensity: 1.2,
+                    metalness: 0.2,
+                    roughness: 0.4,
+                })
+            );
+            ring.position.y = 1.5;
+            group.add(ring);
+            const disc = new THREE.Mesh(
+                new THREE.CircleGeometry(1.0, 48),
+                new THREE.MeshBasicMaterial({
+                    color: 0x7a66ff,
+                    transparent: true,
+                    opacity: 0.55,
+                })
+            );
+            disc.position.y = 1.5;
+            group.add(disc);
+        }
+
+        // The taproom sits on −Z relative to the apex, so rotate 180° around Y
+        // so the portal's front face (model +Z) points into the taproom where
+        // the player stands. If the source happens to already face −Z, the
+        // extra 180° still looks fine (portals are visually symmetric front/back).
+        group.rotation.y = Math.PI;
+        group.position.set(x, 0, z);
+        this.scene.add(group);
     }
 
     /**

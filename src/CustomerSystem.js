@@ -72,7 +72,10 @@ export class CustomerSystem {
         const homeSeat = this._takeFreeTableSeat();
 
         const group = new THREE.Group();
-        const entrance = new THREE.Vector3(0, 0, 22);
+        // Spawn just south of the taproom apex (z=22) so patrons start on the
+        // outside of the portal door and have to visibly walk north through
+        // its gateway before reaching the bar. See World._buildTaproomEntrancePortal.
+        const entrance = new THREE.Vector3(0, 0, 22.6);
         group.position.copy(entrance);
 
         let body = null;
@@ -581,7 +584,9 @@ export class CustomerSystem {
             }
 
             if (c.state === 'leaving') {
-                const dir = this._vDir.subVectors(this._vExit.set(0, 0, 24), c.group.position);
+                // Aim for a point beyond the portal so patrons walk back
+                // through the gateway before being disposed.
+                const dir = this._vDir.subVectors(this._vExit.set(0, 0, 24.5), c.group.position);
                 const dist = dir.length();
                 if (dist < 0.5) {
                     this._disposeCustomer(c);
