@@ -690,6 +690,7 @@ function playIntroVideo() {
     return new Promise((resolve) => {
         const overlay = document.getElementById('intro-video-overlay');
         const video = document.getElementById('intro-video');
+        const enterBtn = document.getElementById('intro-video-enter');
         if (!overlay || !video) {
             resolve();
             return;
@@ -699,20 +700,43 @@ function playIntroVideo() {
         const finish = () => {
             if (done) return;
             done = true;
-            window.removeEventListener('keydown', onKey, true);
-            video.removeEventListener('ended', finish);
+            window.removeEventListener('keydown', onSkipKey, true);
+            window.removeEventListener('keydown', onEnterKey, true);
+            video.removeEventListener('ended', onEndedNatural);
             video.removeEventListener('error', finish);
+            enterBtn?.removeEventListener('click', onEnterClick);
             try { video.pause(); } catch (_) {}
             overlay.classList.remove('active');
-            // Release the frame so the next play-through starts from 0 without
-            // a lingering still of the last frame.
+            overlay.classList.remove('awaiting-enter');
             try { video.currentTime = 0; } catch (_) {}
             resolve();
         };
 
-        const onKey = (e) => {
-            // Only Space or Enter skips — prevents stray clicks or movement
-            // keys from cutting the intro short.
+        // When the video finishes on its own, the original "Start brewing"
+        // click has long expired as a valid user gesture, so requestPointerLock
+        // would silently fail. Swap the skip hint for a "Click to enter" button
+        // that captures a fresh gesture right before the game takes over.
+        const showEnterPrompt = () => {
+            if (done) return;
+            try { video.pause(); } catch (_) {}
+            overlay.classList.add('awaiting-enter');
+            if (enterBtn) enterBtn.focus();
+        };
+
+        const onSkipKey = (e) => {
+            // Only Space or Enter skips while the cinematic is still playing.
+            if (overlay.classList.contains('awaiting-enter')) return;
+            if (e.code === 'Space' || e.code === 'Enter' || e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                // Skip via keypress is itself a user gesture, so we can jump
+                // straight into the game without an extra confirmation click.
+                finish();
+            }
+        };
+
+        const onEnterKey = (e) => {
+            if (!overlay.classList.contains('awaiting-enter')) return;
             if (e.code === 'Space' || e.code === 'Enter' || e.key === 'Enter') {
                 e.preventDefault();
                 e.stopPropagation();
@@ -720,41 +744,68 @@ function playIntroVideo() {
             }
         };
 
-        // Hide every start-screen panel while the cinematic plays. beginPlaySession
-        // repeats these hides after the await, but doing it now prevents a flash
-        // of the character-select panel behind the video on slow machines.
+        const onEnterClick = () => finish();
+        const onEndedNatural = () => showEnterPrompt();
+
         hideCharacterSelectPanel?.();
         if (startScreen) startScreen.style.display = 'none';
 
         overlay.classList.add('active');
+        overlay.classList.remove('awaiting-enter');
         video.muted = false;
         video.currentTime = 0;
-        video.addEventListener('ended', finish);
+        video.addEventListener('ended', onEndedNatural);
         video.addEventListener('error', finish);
-        window.addEventListener('keydown', onKey, true);
+        enterBtn?.addEventListener('click', onEnterClick);
+        window.addEventListener('keydown', onSkipKey, true);
+        window.addEventListener('keydown', onEnterKey, true);
 
         const playPromise = video.play();
         if (playPromise && typeof playPromise.catch === 'function') {
             playPromise.catch(() => {
-                // Autoplay with sound can be blocked if the user hasn't
-                // interacted yet. Fall back to muted playback so the cinematic
-                // still runs instead of hanging the start button.
                 try {
                     video.muted = true;
-                    video.play().catch(() => finish());
+                    video.play().catch(() => showEnterPrompt());
                 } catch (_) {
-                    finish();
+                    showEnterPrompt();
                 }
             });
         }
 
-        // Hard safety net: if the video metadata never loads (e.g. asset
-        // missing on a stale deploy), bail out after 2 seconds so the player
-        // isn't stuck staring at black.
+        // If the asset can't load at all (e.g. stale deploy), don't strand the
+        // user on a black screen — show the click-to-enter prompt so they can
+        // proceed manually.
         setTimeout(() => {
-            if (!done && video.readyState < 2 && video.paused) finish();
+            if (!done && video.readyState < 2 && video.paused) showEnterPrompt();
         }, 2000);
     });
+}
+
+/**
+ * Pointer-lock fallback. If requestPointerLock fires pointerlockerror (no
+ * active user gesture, iframe sandbox, etc.), display a full-screen "Click to
+ * play" prompt. The click captures a fresh gesture and re-tries the lock.
+ */
+function showClickToLockOverlay() {
+    const overlay = document.getElementById('click-to-lock-overlay');
+    if (!overlay) return;
+    if (overlay.classList.contains('active')) return;
+    overlay.classList.add('active');
+    const onActivate = (e) => {
+        e.preventDefault();
+        overlay.classList.remove('active');
+        overlay.removeEventListener('click', onActivate);
+        window.removeEventListener('keydown', onKey, true);
+        if (gameState) gameState._pointerLockFailed = false;
+        player?.lock();
+    };
+    const onKey = (e) => {
+        if (e.code === 'Space' || e.code === 'Enter') {
+            onActivate(e);
+        }
+    };
+    overlay.addEventListener('click', onActivate);
+    window.addEventListener('keydown', onKey, true);
 }
 
 async function beginPlaySession(fromSave) {
@@ -809,6 +860,15 @@ async function beginPlaySession(fromSave) {
     hideMultiplayerPanels();
     renderer.domElement.style.pointerEvents = 'auto';
     player.lock();
+    // If the browser rejected pointer lock (the "Start brewing" click gesture
+    // was consumed by awaits above, or the video played to its natural end),
+    // show a click-to-play overlay that captures a fresh gesture. We check on
+    // the next frame because pointerlockchange/pointerlockerror are async.
+    requestAnimationFrame(() => {
+        if (!document.pointerLockElement && gameState.started) {
+            showClickToLockOverlay();
+        }
+    });
 
     await ensureAudioStarted();
 

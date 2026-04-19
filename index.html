@@ -101,6 +101,65 @@
             font-weight: bold;
             padding: 0 4px;
         }
+        #intro-video-enter {
+            display: none;
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            padding: 16px 38px;
+            font-size: 22px;
+            letter-spacing: 2px;
+            color: #e8f4ff;
+            background: rgba(16, 28, 48, 0.88);
+            border: 1px solid #66ccff;
+            border-radius: 12px;
+            box-shadow: 0 0 30px rgba(100, 200, 255, 0.35);
+            cursor: pointer;
+            font-family: inherit;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        #intro-video-enter:hover {
+            background: rgba(36, 58, 88, 0.95);
+        }
+        #intro-video-overlay.awaiting-enter #intro-video-enter {
+            display: block;
+        }
+        #intro-video-overlay.awaiting-enter #intro-video-hint {
+            opacity: 0;
+        }
+        #click-to-lock-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 400;
+            background: rgba(5, 10, 20, 0.82);
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        #click-to-lock-overlay.active {
+            display: flex;
+        }
+        #click-to-lock-box {
+            text-align: center;
+            padding: 26px 42px;
+            background: rgba(16, 28, 48, 0.95);
+            border: 1px solid #66ccff;
+            border-radius: 14px;
+            box-shadow: 0 0 30px rgba(100, 200, 255, 0.35);
+            pointer-events: none;
+        }
+        #click-to-lock-title {
+            font-size: 26px;
+            color: #66eeff;
+            letter-spacing: 2px;
+            margin-bottom: 8px;
+        }
+        #click-to-lock-note {
+            font-size: 14px;
+            color: #8aa0b8;
+        }
 
         #start-screen {
             position: fixed;
@@ -389,6 +448,14 @@
             <source src="assets/video/intro.mp4" type="video/mp4" />
         </video>
         <div id="intro-video-hint">Press <span>Space</span> or <span>Enter</span> to skip</div>
+        <button type="button" id="intro-video-enter">Click to enter the brewery</button>
+    </div>
+
+    <div id="click-to-lock-overlay" aria-hidden="true">
+        <div id="click-to-lock-box">
+            <div id="click-to-lock-title">Click to play</div>
+            <div id="click-to-lock-note">Your browser needs a fresh click to capture the mouse.</div>
+        </div>
     </div>
 
     <div id="start-screen">
