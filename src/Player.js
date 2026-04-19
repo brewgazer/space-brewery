@@ -172,6 +172,9 @@ export class Player {
     setPatronAvatar(assetBucket, colorIndex = 0) {
         this._removePatron();
         const brew = assetBucket?.brewerTemplate;
+        console.info('[Player] setPatronAvatar colorIndex=', colorIndex,
+            'hasBrewer=', !!brew?.scene,
+            'hasDiffuseVariants=', !!brew?.diffuseVariants);
         const patron = assetBucket?.patronTemplate;
         const tpl = brew?.scene ? brew : patron;
         if (!tpl?.scene) {
