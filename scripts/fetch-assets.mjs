@@ -1,7 +1,8 @@
 /**
  * Downloads free CC0 / example assets for Brewery Sim.
  * Sources:
- *   - Soldier.glb, Fox.glb — three.js examples (MIT project; models commonly used for demos)
+ *   - Patron.glb (RobotExpressive), Fox.glb — three.js examples (MIT)
+ *   - FurnitureChair.glb (SheenChair Khronos sample in three.js examples)
  *   - Poly Haven textures — CC0 (https://polyhaven.com)
  *
  * Run: npm run fetch-assets
@@ -21,12 +22,16 @@ fs.mkdirSync(texDir, { recursive: true });
 
 const downloads = [
     [
-        'Soldier.glb',
-        'https://raw.githubusercontent.com/mrdoob/three.js/r160/examples/models/gltf/Soldier.glb',
+        'Patron.glb',
+        'https://raw.githubusercontent.com/mrdoob/three.js/r173/examples/models/gltf/RobotExpressive/RobotExpressive.glb',
     ],
     [
         'Fox.glb',
         'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Fox/glTF-Binary/Fox.glb',
+    ],
+    [
+        'FurnitureChair.glb',
+        'https://raw.githubusercontent.com/mrdoob/three.js/r173/examples/models/gltf/SheenChair.glb',
     ],
     [
         'wood_floor_worn_diff_1k.jpg',

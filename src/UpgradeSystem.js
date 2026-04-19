@@ -1,5 +1,11 @@
 import * as THREE from 'three';
 
+const LOCK_DIM = {
+    brewStation: { w: 2.5, h: 2.4, d: 2, y: 1.2 },
+    fermenter: { w: 1.4, h: 3.4, d: 1.4, y: 1.7 },
+    tap: { w: 1, h: 1, d: 0.6, y: 0.5 },
+};
+
 export class UpgradeSystem {
     constructor(world, gameState, audioSystem, ui) {
         this.world = world;
@@ -45,10 +51,14 @@ export class UpgradeSystem {
         // Remove lock overlay and label
         if (station.lockOverlay) {
             station.group.remove(station.lockOverlay);
+            station.lockOverlay.geometry?.dispose?.();
+            station.lockOverlay.material?.dispose?.();
             station.lockOverlay = null;
         }
         if (station.lockLabel) {
             station.group.remove(station.lockLabel);
+            station.lockLabel.material?.map?.dispose?.();
+            station.lockLabel.material?.dispose?.();
             station.lockLabel = null;
         }
 
@@ -57,15 +67,63 @@ export class UpgradeSystem {
             const parent = station.label.parent;
             const pos = station.label.position.clone();
             parent.remove(station.label);
+            station.label.material?.map?.dispose?.();
+            station.label.material?.dispose?.();
 
             let name;
-            if (type === 'brewStation') name = `Brew Station ${index + 1}`;
-            else if (type === 'fermenter') name = `Fermenter ${index + 1}`;
+            if (type === 'brewStation') name = `Reactor ${index + 1}`;
+            else if (type === 'fermenter') name = `Bio-Tank ${index + 1}`;
             else name = `Tap ${index + 1}`;
 
             station.label = this._textSprite(name, 0xffffff);
             station.label.position.copy(pos);
             parent.add(station.label);
+        }
+    }
+
+    _addLockOverlay(station, type) {
+        const dim = LOCK_DIM[type];
+        if (!dim) return;
+        const overlay = new THREE.Mesh(
+            new THREE.BoxGeometry(dim.w + 0.15, dim.h + 0.15, dim.d + 0.15),
+            new THREE.MeshStandardMaterial({
+                color: 0x181818,
+                transparent: true,
+                opacity: 0.55,
+                depthWrite: false,
+            })
+        );
+        overlay.position.y = dim.y;
+        overlay.renderOrder = 1;
+        station.group.add(overlay);
+        const lockLabel = this._textSprite(`LOCKED  $${station.cost}`, 0xff6644, 0.8);
+        lockLabel.position.y = dim.y + dim.h / 2 + 0.35;
+        station.group.add(lockLabel);
+        station.lockOverlay = overlay;
+        station.lockLabel = lockLabel;
+    }
+
+    /** Match saved or default progression without spending money. */
+    syncStationUnlock(type, index, shouldUnlock) {
+        const station = this._getStation(type, index);
+        if (!station) return;
+        if (shouldUnlock && !station.unlocked) {
+            this._unlock(station, type, index);
+        } else if (!shouldUnlock && station.unlocked) {
+            station.unlocked = false;
+            if (station.lockOverlay) {
+                station.group.remove(station.lockOverlay);
+                station.lockOverlay.geometry?.dispose?.();
+                station.lockOverlay.material?.dispose?.();
+                station.lockOverlay = null;
+            }
+            if (station.lockLabel) {
+                station.group.remove(station.lockLabel);
+                station.lockLabel.material?.map?.dispose?.();
+                station.lockLabel.material?.dispose?.();
+                station.lockLabel = null;
+            }
+            this._addLockOverlay(station, type);
         }
     }
 

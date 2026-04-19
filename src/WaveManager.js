@@ -147,7 +147,8 @@ export class WaveManager {
 
         this.gameState.dayNumber++;
         this.gameState.dailyCravings = this.recipeSystem.generateDailyCravings(
-            this.gameState.dayNumber
+            this.gameState.dayNumber,
+            this.gameState.unlockedRecipeIds
         );
 
         if (this.onDayEnd) this.onDayEnd(this.gameState.dayNumber, summary);
@@ -155,5 +156,85 @@ export class WaveManager {
         setTimeout(() => {
             this.startDay();
         }, 6000);
+    }
+
+    /** Same calendar day, waves reset; cravings re-rolled for this day. */
+    restartCurrentDay() {
+        const day = this.gameState.dayNumber;
+        this.dayActive = true;
+        this.wavesCompleted = 0;
+        this.waveNumber = 0;
+        this.waitingForPlayer = true;
+        this.betweenWaves = false;
+        this.waveActive = false;
+        this.betweenWaveTimer = 0;
+        this.customersSpawned = 0;
+        this.customersToSpawn = 0;
+        this.spawnTimer = 0;
+
+        this.wavesPerDay = Math.min(10, 5 + Math.floor((day - 1) / 3));
+        this.gameState.currentWave = 0;
+        this.gameState.waveActive = false;
+        this.gameState.waitingForPlayer = true;
+        this.gameState.dailyCravings = this.recipeSystem.generateDailyCravings(
+            day,
+            this.gameState.unlockedRecipeIds
+        );
+
+        this.dayStartMoney = this.gameState.player.money;
+        this.dayCustomersServed = 0;
+        this.dayCustomersLost = 0;
+
+        if (this.onDayStart) this.onDayStart(day);
+        if (this.onWaitingForPlayer) this.onWaitingForPlayer();
+    }
+
+    getWaveSave() {
+        return {
+            waveNumber: this.waveNumber,
+            customersToSpawn: this.customersToSpawn,
+            customersSpawned: this.customersSpawned,
+            spawnTimer: this.spawnTimer,
+            spawnInterval: this.spawnInterval,
+            basePatience: this.basePatience,
+            waveActive: this.waveActive,
+            betweenWaves: this.betweenWaves,
+            betweenWaveTimer: this.betweenWaveTimer,
+            dayActive: this.dayActive,
+            wavesPerDay: this.wavesPerDay,
+            wavesCompleted: this.wavesCompleted,
+            waitingForPlayer: this.waitingForPlayer,
+            dayStartMoney: this.dayStartMoney,
+            dayCustomersServed: this.dayCustomersServed,
+            dayCustomersLost: this.dayCustomersLost,
+        };
+    }
+
+    setWaveSave(s) {
+        if (!s || typeof s !== 'object') return;
+        const keys = [
+            'waveNumber',
+            'customersToSpawn',
+            'customersSpawned',
+            'spawnTimer',
+            'spawnInterval',
+            'basePatience',
+            'waveActive',
+            'betweenWaves',
+            'betweenWaveTimer',
+            'dayActive',
+            'wavesPerDay',
+            'wavesCompleted',
+            'waitingForPlayer',
+            'dayStartMoney',
+            'dayCustomersServed',
+            'dayCustomersLost',
+        ];
+        for (const k of keys) {
+            if (s[k] !== undefined) this[k] = s[k];
+        }
+        this.gameState.currentWave = this.waveNumber;
+        this.gameState.waveActive = this.waveActive;
+        this.gameState.waitingForPlayer = this.waitingForPlayer;
     }
 }

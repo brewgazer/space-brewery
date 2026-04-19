@@ -1,8 +1,18 @@
 {
   "name": "brewery-simulator",
   "private": true,
-  "description": "First-person brewery sim — run fetch-assets before first play for HD models/textures.",
+  "description": "First-person space-station brewery sim — fetch-assets for patron model and textures.",
   "scripts": {
-    "fetch-assets": "node scripts/fetch-assets.mjs"
+    "fetch-assets": "node scripts/fetch-assets.mjs",
+    "copy-brewer": "node scripts/copy-brewer-assets.mjs",
+    "start": "npx --yes serve . -l 8080",
+    "relay": "node server/relay.mjs",
+    "pages:package": "node scripts/package-pages.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.20.0"
   }
 }

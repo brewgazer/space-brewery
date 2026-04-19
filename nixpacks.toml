@@ -1,0 +1,3 @@
+# Ensures the deployed process is the relay, not `npm start` (static file server).
+[start]
+cmd = "node server/relay.mjs"

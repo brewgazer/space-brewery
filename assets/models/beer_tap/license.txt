@@ -1,0 +1,11 @@
+Model Information:
+* title:	Beer Tap
+* source:	https://sketchfab.com/3d-models/beer-tap-c9acfd3b484b4601806d88e0d4aa2cb6
+* author:	Daz (https://sketchfab.com/Darren.Hogan)
+
+Model License:
+* license type:	CC-BY-NC-4.0 (http://creativecommons.org/licenses/by-nc/4.0/)
+* requirements:	Author must be credited. No commercial use.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Beer Tap" (https://sketchfab.com/3d-models/beer-tap-c9acfd3b484b4601806d88e0d4aa2cb6) by Daz (https://sketchfab.com/Darren.Hogan) licensed under CC-BY-NC-4.0 (http://creativecommons.org/licenses/by-nc/4.0/)

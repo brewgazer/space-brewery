@@ -1,0 +1,9 @@
+# Railway: deploy this repo as a WebSocket relay (free tier).
+# https://railway.com — New Project → Deploy from GitHub → select repo,
+# then set Root Directory empty (repo root) and deploy.
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "node server/relay.mjs"

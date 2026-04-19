@@ -3,15 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Brewery Simulator</title>
+    <title>Space Brewery Sim</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             overflow: hidden;
-            background: #0a0604;
+            background: #100818;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-        canvas { display: block; }
+        /* Canvas must not steal clicks from the start screen (fixed below). */
+        body > canvas {
+            display: block;
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+        }
 
         #ui-overlay {
             position: fixed;
@@ -45,33 +54,81 @@
         }
         #crosshair.active::before,
         #crosshair.active::after {
-            background: rgba(255, 200, 50, 1);
-            filter: drop-shadow(0 0 4px rgba(255, 200, 50, 0.6));
+            background: rgba(100, 220, 255, 1);
+            filter: drop-shadow(0 0 4px rgba(80, 200, 255, 0.55));
         }
 
         #start-screen {
             position: fixed;
             top: 0; left: 0;
             width: 100%; height: 100%;
-            z-index: 100;
+            z-index: 200;
+            pointer-events: auto;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            background: radial-gradient(ellipse at center, #2c1a0e 0%, #0a0604 80%);
-            cursor: pointer;
+            background: radial-gradient(ellipse at center, #1a2840 0%, #050810 75%);
+            cursor: default;
             user-select: none;
+        }
+        .start-btn.browse-active {
+            outline: 2px solid #66eeff;
+            box-shadow: 0 0 12px rgba(100, 220, 255, 0.35);
+        }
+        .start-btn {
+            font-size: 18px;
+            padding: 12px 28px;
+            min-width: 260px;
+            cursor: pointer;
+            border-radius: 10px;
+            border: 1px solid #5588aa;
+            background: #1a3048;
+            color: #e8f4ff;
+            margin: 6px 0;
+        }
+        .start-btn:hover:not(:disabled) {
+            background: #243a58;
+            border-color: #66ccff;
+        }
+        .start-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.45;
+        }
+        #start-settings-panel {
+            display: none;
+            flex-direction: column;
+            gap: 14px;
+            align-items: stretch;
+            background: rgba(16,28,48,0.96);
+            padding: 22px 28px;
+            border-radius: 14px;
+            border: 1px solid rgba(100,180,220,0.45);
+            min-width: 300px;
+            max-width: 92vw;
+            margin-top: 16px;
+        }
+        #start-settings-panel label {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            color: #c8d8e8;
+            font-size: 14px;
+        }
+        #start-settings-panel input[type="range"] {
+            width: 100%;
+            accent-color: #44aacc;
         }
         #start-screen h1 {
             font-size: 64px;
-            color: #ffd700;
-            text-shadow: 3px 3px 12px rgba(255,165,0,0.5), 0 0 40px rgba(255,165,0,0.2);
+            color: #66eeff;
+            text-shadow: 3px 3px 12px rgba(0,200,255,0.45), 0 0 40px rgba(100,180,255,0.25);
             margin-bottom: 10px;
             letter-spacing: 4px;
         }
         #start-screen .subtitle {
             font-size: 22px;
-            color: #b87333;
+            color: #88aacc;
             margin-bottom: 50px;
             letter-spacing: 2px;
         }
@@ -93,10 +150,10 @@
             background: rgba(0,0,0,0.3);
             padding: 20px 40px;
             border-radius: 12px;
-            border: 1px solid rgba(184,115,51,0.3);
+            border: 1px solid rgba(80,160,200,0.35);
         }
         #start-screen .controls span {
-            color: #ddb874;
+            color: #99ccff;
             font-weight: bold;
         }
 
@@ -106,6 +163,174 @@
             display: block;
             filter: drop-shadow(0 0 20px rgba(255,165,0,0.4));
         }
+        .save-slot-btn {
+            min-width: 76px;
+            padding: 8px 10px !important;
+            font-size: 15px !important;
+            margin: 0 !important;
+        }
+        .save-slot-btn.active {
+            border-color: #66eeff;
+            box-shadow: 0 0 14px rgba(100, 220, 255, 0.4);
+            background: #243a58;
+        }
+        #character-select-panel {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 16px;
+            padding: 12px 20px;
+            background: rgba(12, 20, 36, 0.75);
+            border-radius: 12px;
+            border: 1px solid rgba(80, 160, 200, 0.35);
+            max-width: 92vw;
+            pointer-events: auto;
+            position: relative;
+            z-index: 5;
+        }
+        .char-swatch {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid rgba(255, 255, 255, 0.25);
+            box-sizing: border-box;
+        }
+        .char-swatch:hover {
+            filter: brightness(1.12);
+        }
+        .char-swatch.selected {
+            border-color: #fff;
+            box-shadow: 0 0 12px rgba(255, 255, 255, 0.55);
+        }
+        #mode-select-panel,
+        #host-form-panel,
+        #find-game-panel {
+            display: none;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 12px;
+            background: rgba(12, 20, 36, 0.85);
+            padding: 22px 26px;
+            border-radius: 14px;
+            border: 1px solid rgba(100, 180, 220, 0.45);
+            min-width: 320px;
+            max-width: 92vw;
+            margin-bottom: 16px;
+        }
+        #mode-select-panel h3,
+        #host-form-panel h3,
+        #find-game-panel h3 {
+            color: #66eeff;
+            font-size: 20px;
+            text-align: center;
+            letter-spacing: 1px;
+            margin: 0 0 4px 0;
+        }
+        #mode-select-panel .note,
+        #host-form-panel .note,
+        #find-game-panel .note {
+            color: #8aa0b8;
+            font-size: 13px;
+            text-align: center;
+            line-height: 1.4;
+        }
+        #host-form-panel input[type="text"],
+        #find-game-panel input[type="text"],
+        #character-name-row input[type="text"] {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(100, 180, 220, 0.4);
+            background: #0d1828;
+            color: #e8f4ff;
+            font-size: 15px;
+        }
+        #host-form-panel input[type="text"]:focus,
+        #find-game-panel input[type="text"]:focus,
+        #character-name-row input[type="text"]:focus {
+            outline: none;
+            border-color: #66ccff;
+            box-shadow: 0 0 8px rgba(100, 200, 255, 0.35);
+        }
+        #character-name-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            width: 100%;
+            max-width: 320px;
+            color: #c8d8e8;
+            font-size: 13px;
+        }
+        #server-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 260px;
+            overflow-y: auto;
+            padding: 6px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            border: 1px solid rgba(80, 140, 180, 0.3);
+        }
+        .server-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            background: #142235;
+            border: 1px solid rgba(100, 180, 220, 0.25);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.12s, border-color 0.12s;
+        }
+        .server-row:hover {
+            background: #1b2d46;
+            border-color: #66ccff;
+        }
+        .server-row .srv-name {
+            color: #cdecff;
+            font-weight: bold;
+            font-size: 15px;
+            text-align: left;
+        }
+        .server-row .srv-meta {
+            color: #8aa0b8;
+            font-size: 12px;
+            text-align: left;
+        }
+        .server-row .srv-count {
+            color: #88ddbb;
+            font-size: 13px;
+        }
+        #server-list-empty {
+            padding: 18px;
+            text-align: center;
+            color: #6a8aaa;
+            font-size: 14px;
+            font-style: italic;
+        }
+        #mp-session-banner {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 6px 14px;
+            background: rgba(12, 28, 46, 0.85);
+            border: 1px solid rgba(100, 180, 220, 0.5);
+            border-radius: 20px;
+            color: #cdecff;
+            font-size: 13px;
+            z-index: 150;
+            pointer-events: none;
+            display: none;
+        }
+        #mp-session-banner .mp-ping {
+            color: #88ddbb;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -113,23 +338,96 @@
         <div id="crosshair"></div>
     </div>
 
+    <div id="mp-session-banner"><span id="mp-banner-text">Offline</span></div>
+
     <div id="start-screen">
         <span class="beer-icon">🍺</span>
-        <h1>BREWERY SIM</h1>
-        <div class="subtitle">Brew. Ferment. Serve. Repeat.</div>
-        <div id="loading-line" style="font-size:15px;color:#887766;margin-bottom:12px;min-height:22px;"></div>
-        <div class="click-prompt">Click Anywhere to Start</div>
+        <h1>SPACE BREWERY</h1>
+        <div class="subtitle">Orbital craft beer. Robots welcome.</div>
+        <div id="loading-line" style="font-size:15px;color:#6a8aaa;margin-bottom:12px;min-height:22px;"></div>
+        <div id="save-slot-row" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;justify-content:center;">
+            <button type="button" class="save-slot-btn start-btn active" data-slot="0">Save 1</button>
+            <button type="button" class="save-slot-btn start-btn" data-slot="1">Save 2</button>
+            <button type="button" class="save-slot-btn start-btn" data-slot="2">Save 3</button>
+            <button type="button" class="save-slot-btn start-btn" data-slot="3">Save 4</button>
+        </div>
+        <div id="start-menu-buttons" style="display:flex;flex-direction:column;align-items:center;margin-bottom:20px;">
+            <button type="button" id="btn-continue" class="start-btn" disabled>Play saved game</button>
+            <button type="button" id="btn-new-game" class="start-btn">New game</button>
+            <button type="button" id="btn-find-game" class="start-btn">Find game</button>
+            <button type="button" id="btn-start-settings" class="start-btn">Settings</button>
+        </div>
+
+        <div id="mode-select-panel">
+            <h3 id="mode-select-title">Choose mode</h3>
+            <div class="note" id="mode-select-note">Offline plays solo. Local uses other tabs on this PC. Online uses the WebSocket relay — run <code style="font-size:0.95em;">npm run relay</code> and open the game on two machines or browsers.</div>
+            <button type="button" id="btn-mode-offline" class="start-btn">Offline — solo</button>
+            <button type="button" id="btn-mode-local" class="start-btn">Local — host a server</button>
+            <button type="button" id="btn-mode-online" class="start-btn">Online — host a server</button>
+            <button type="button" id="btn-mode-back" class="start-btn">Back</button>
+        </div>
+
+        <div id="host-form-panel">
+            <h3 id="host-form-title">Host a Local server</h3>
+            <div class="note">Give your server a name — other players will find it in the Find game list. Rooms are capped at 4 brewers (including you) to keep the economy honest.</div>
+            <input type="text" id="host-server-name" maxlength="48" placeholder="e.g. Zero-G Tap House" />
+            <button type="button" id="btn-host-next" class="start-btn">Next: pick your brewer</button>
+            <button type="button" id="btn-host-back" class="start-btn">Back</button>
+        </div>
+
+        <div id="find-game-panel">
+            <h3>Find a game</h3>
+            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:10px;">
+                <button type="button" id="btn-browse-local" class="start-btn browse-active">This PC (tabs)</button>
+                <button type="button" id="btn-browse-online" class="start-btn">Online (relay)</button>
+            </div>
+            <div class="note" id="find-game-note">Other tabs on this PC only — open two tabs to test.</div>
+            <div id="server-list">
+                <div id="server-list-empty">Searching for servers…</div>
+            </div>
+            <button type="button" id="btn-find-refresh" class="start-btn">Refresh</button>
+            <button type="button" id="btn-find-back" class="start-btn">Back</button>
+        </div>
+
+        <div id="character-select-panel">
+            <div style="font-size:18px;font-weight:bold;color:#88ddff;" id="char-select-title">Choose your brewer</div>
+            <div style="font-size:13px;color:#8aa0b8;" id="char-select-note">Same models as patrons — pick an outfit color</div>
+            <div id="character-name-row">
+                <label for="player-name-input">Display name (shown above your head to other players)</label>
+                <input type="text" id="player-name-input" maxlength="24" placeholder="Brewer" />
+            </div>
+            <div id="character-colors" style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;padding:8px 0;"></div>
+            <button type="button" id="btn-character-start" class="start-btn">Start brewing</button>
+            <button type="button" id="btn-character-back" class="start-btn">Back</button>
+        </div>
+        <div id="start-settings-panel">
+            <div style="font-size:22px;font-weight:bold;color:#66eeff;text-align:center;">Settings</div>
+            <label>Music volume
+                <input type="range" id="start-bgm" min="0" max="100" value="22" step="1" />
+            </label>
+            <label>Sound effects volume
+                <input type="range" id="start-sfx" min="0" max="100" value="55" step="1" />
+            </label>
+            <button type="button" id="btn-start-settings-back" class="start-btn">Back</button>
+        </div>
         <div class="controls">
             <span>WASD</span> Move &nbsp;&bull;&nbsp;
+            <span>Shift</span> Sprint (full stamina) &nbsp;&bull;&nbsp;
             <span>Mouse</span> Look &nbsp;&bull;&nbsp;
             <span>E</span> Interact<br>
             <span>1–0</span> Select Recipe/Keg<br>
             <span>F</span> Send Customers &nbsp;&bull;&nbsp;
-            <span>ESC</span> Pause<br><br>
-            Brew &rarr; Ferment &rarr; Keg &rarr; Serve &rarr; Upgrade!
+            <span>V</span> Suggest swap (behind bar, patron across from you) &nbsp;&bull;&nbsp;
+            <span>ESC</span> Pause / resume menu<br><br>
+            Four save slots &nbsp;&bull;&nbsp; New game: pick patron outfit color<br>
+            Brew &rarr; Ferment &rarr; Keg &rarr; Serve &rarr; Upgrade!<br>
+            <span>Multiplayer</span> Host a Local server or Find one — open two tabs of this page to test.
         </div>
     </div>
 
+    <script>
+        window.BREW_RELAY_URL = window.BREW_RELAY_URL || 'ws://127.0.0.1:8787';
+    </script>
     <script type="importmap">
     {
         "imports": {

@@ -1,0 +1,48 @@
+# Build static site → GitHub Pages. Enable Pages in repo Settings:
+# Settings → Pages → Build and deployment → Source: GitHub Actions
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: ['main']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Package static site
+        run: node scripts/package-pages.mjs
+
+      - name: Inject production relay URL (secret)
+        env:
+          BREW_RELAY_WSS_URL: ${{ secrets.BREW_RELAY_WSS_URL }}
+          INDEX_PATH: ${{ github.workspace }}/_site/index.html
+        run: node scripts/set-relay-for-pages.mjs
+
+      - uses: actions/configure-pages@v4
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

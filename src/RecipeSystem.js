@@ -1,3 +1,6 @@
+/** New games start with only these recipe ids unlocked (kiosk sells the rest). */
+export const STARTER_UNLOCKED_RECIPE_IDS = ['lager'];
+
 export const RECIPES = [
     {
         id: 'ipa',
@@ -7,7 +10,8 @@ export const RECIPES = [
         description: 'Hoppy & Bitter',
         brewTime: 18,
         fermentTime: 45,
-        price: 8
+        price: 8,
+        unlockCost: 140,
     },
     {
         id: 'stout',
@@ -17,7 +21,8 @@ export const RECIPES = [
         description: 'Dark & Heavy',
         brewTime: 22,
         fermentTime: 55,
-        price: 10
+        price: 10,
+        unlockCost: 175,
     },
     {
         id: 'lager',
@@ -27,7 +32,8 @@ export const RECIPES = [
         description: 'Light & Crisp',
         brewTime: 14,
         fermentTime: 35,
-        price: 6
+        price: 6,
+        unlockCost: 0,
     },
     {
         id: 'wheat',
@@ -37,7 +43,8 @@ export const RECIPES = [
         description: 'Cloudy & Smooth',
         brewTime: 15,
         fermentTime: 38,
-        price: 7
+        price: 7,
+        unlockCost: 125,
     },
     {
         id: 'paleale',
@@ -47,7 +54,8 @@ export const RECIPES = [
         description: 'Balanced & Malty',
         brewTime: 16,
         fermentTime: 40,
-        price: 7
+        price: 7,
+        unlockCost: 130,
     },
     {
         id: 'porter',
@@ -57,7 +65,8 @@ export const RECIPES = [
         description: 'Rich & Roasty',
         brewTime: 20,
         fermentTime: 50,
-        price: 9
+        price: 9,
+        unlockCost: 155,
     },
     {
         id: 'pilsner',
@@ -67,7 +76,8 @@ export const RECIPES = [
         description: 'Clean & Refreshing',
         brewTime: 13,
         fermentTime: 32,
-        price: 6
+        price: 6,
+        unlockCost: 110,
     },
     {
         id: 'amber',
@@ -77,7 +87,8 @@ export const RECIPES = [
         description: 'Toasty & Caramel',
         brewTime: 17,
         fermentTime: 42,
-        price: 8
+        price: 8,
+        unlockCost: 135,
     },
     {
         id: 'saison',
@@ -87,7 +98,8 @@ export const RECIPES = [
         description: 'Fruity & Spicy',
         brewTime: 19,
         fermentTime: 48,
-        price: 9
+        price: 9,
+        unlockCost: 150,
     },
     {
         id: 'redale',
@@ -97,8 +109,9 @@ export const RECIPES = [
         description: 'Malty & Smooth',
         brewTime: 17,
         fermentTime: 43,
-        price: 8
-    }
+        price: 8,
+        unlockCost: 145,
+    },
 ];
 
 export class RecipeSystem {
@@ -106,13 +119,22 @@ export class RecipeSystem {
         this.recipes = RECIPES;
     }
 
-    generateDailyCravings(dayNumber = 1) {
-        const shuffled = [...this.recipes].sort(() => Math.random() - 0.5);
-        // Day 1-2: 2 cravings, Day 3-4: 3, Day 5+: 3-4
-        let count;
-        if (dayNumber <= 2) count = 2;
-        else if (dayNumber <= 4) count = 3;
-        else count = 3 + (Math.random() < 0.5 ? 1 : 0);
+    /**
+     * Only beers the player has purchased can appear as cravings.
+     * More unlocked styles → slightly more simultaneous cravings (capped).
+     */
+    generateDailyCravings(_dayNumber, unlockedRecipeIds) {
+        const idSet = new Set(unlockedRecipeIds || []);
+        const pool = this.recipes.filter((r) => idSet.has(r.id));
+        if (pool.length === 0) {
+            const fallback = this.getRecipeById(STARTER_UNLOCKED_RECIPE_IDS[0]) || this.recipes[0];
+            return fallback ? [fallback] : [];
+        }
+        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+        const n = pool.length;
+        const base = 1 + Math.floor(Math.random() * 2);
+        const bonus = Math.min(3, Math.floor(n / 3));
+        const count = Math.min(n, Math.max(1, base + bonus));
         return shuffled.slice(0, count);
     }
 

@@ -1,0 +1,11 @@
+Model Information:
+* title:	Old Keg
+* source:	https://sketchfab.com/3d-models/old-keg-427eeb5f405b4800a237fc2d4c81cd94
+* author:	David DeTogni (https://sketchfab.com/daviddetogni)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Old Keg" (https://sketchfab.com/3d-models/old-keg-427eeb5f405b4800a237fc2d4c81cd94) by David DeTogni (https://sketchfab.com/daviddetogni) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

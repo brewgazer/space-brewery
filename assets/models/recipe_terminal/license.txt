@@ -1,0 +1,11 @@
+Model Information:
+* title:	Futuristic Free-Standing Terminal
+* source:	https://sketchfab.com/3d-models/futuristic-free-standing-terminal-9a1a7f78cd4e4f709b59f070ac5bd48a
+* author:	Inditrion Dradnon (https://sketchfab.com/dradnon)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Futuristic Free-Standing Terminal" (https://sketchfab.com/3d-models/futuristic-free-standing-terminal-9a1a7f78cd4e4f709b59f070ac5bd48a) by Inditrion Dradnon (https://sketchfab.com/dradnon) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
