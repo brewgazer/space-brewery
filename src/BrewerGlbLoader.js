@@ -15,6 +15,14 @@ export const BREWER_GLB_WALK_YAW_OFFSET = 0;
 /** Optional override atlas (same UV layout as Meshy export). */
 const DIFFUSE_TEX_PATH = 'assets/textures/player_brewer_diffuse.png';
 
+/**
+ * Alternate diffuse for the "blue outfit" colour slot. Same UV layout as the
+ * default brewer atlas — only the body panels are repainted so face, hair
+ * and extremities stay identical when we swap `material.map`. Loaded
+ * eagerly alongside the rig so clones can re-map without an async hop.
+ */
+const BLUE_SUIT_TEX_PATH = 'assets/textures/player_brewer_bluesuit_diffuse.png';
+
 /** Bind-pose mesh AABB often sits slightly above the soles; nudge into the floor contact. */
 const FOOT_CONTACT_SINK_METERS = 0.022;
 
@@ -125,20 +133,38 @@ export async function loadBrewerGlbAssets(withTimeout) {
     root.updateMatrixWorld(true);
 
     const texLoader = new THREE.TextureLoader();
-    let diffuse = null;
-    try {
-        diffuse = await new Promise((resolve) => {
-            texLoader.load(
-                encPath(DIFFUSE_TEX_PATH),
-                (t) => resolve(t),
-                undefined,
-                () => resolve(null)
-            );
+    const loadTex = (path) =>
+        new Promise((resolve) => {
+            try {
+                texLoader.load(
+                    encPath(path),
+                    (t) => resolve(t),
+                    undefined,
+                    () => resolve(null)
+                );
+            } catch {
+                resolve(null);
+            }
         });
-    } catch {
-        diffuse = null;
-    }
+    const [diffuse, blueSuit] = await Promise.all([
+        loadTex(DIFFUSE_TEX_PATH),
+        loadTex(BLUE_SUIT_TEX_PATH),
+    ]);
     applyOptionalDiffuse(root, diffuse);
+    // Configure the alternate suit atlas the same way as the base diffuse so
+    // callers can assign it directly onto `material.map` without further
+    // setup. The actual map-swap happens when the local / remote avatar is
+    // spawned for the blue colour slot.
+    if (blueSuit) {
+        blueSuit.colorSpace = THREE.SRGBColorSpace;
+        blueSuit.flipY = false;
+        blueSuit.needsUpdate = true;
+        // Shared by every blue-outfit player (local + remote). Marking it
+        // tells the avatar dispose routines not to dispose() this texture
+        // when a player leaves — the same GPU instance is reused for the
+        // next blue brewer that spawns.
+        blueSuit.userData = { ...(blueSuit.userData || {}), shared: true };
+    }
 
     const idleRaw = gltf.animations?.[0];
     const idle = idleRaw ? idleRaw.clone() : null;
@@ -168,6 +194,17 @@ export async function loadBrewerGlbAssets(withTimeout) {
 
     return {
         scene: root,
+        /**
+         * Alternate diffuse atlases keyed by semantic name. `default` is what
+         * every cloned mesh starts with (already applied to `root`);
+         * `blueSuit` is the optional re-paint used when a player picks the
+         * blue outfit slot. Callers swap `material.map` to this texture to
+         * recolour the body panels without touching the face/hair UVs.
+         */
+        diffuseVariants: {
+            default: diffuse,
+            blueSuit: blueSuit,
+        },
         clips: {
             idle,
             walk: walk || idle,

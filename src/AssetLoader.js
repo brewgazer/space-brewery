@@ -64,6 +64,8 @@ export async function loadGameAssets(renderer, scene) {
         woodFloor: null,
         breweryFloor: null,
         metal: null,
+        /** Wall-art posters used by the taproom (nullable individually). */
+        posters: { astralBrew: null, astroBeer: null, novaLager: null },
     };
 
     const texLoader = new THREE.TextureLoader();
@@ -84,15 +86,38 @@ export async function loadGameAssets(renderer, scene) {
             );
         });
 
-    const [woodFloor, breweryFloor, metal] = await Promise.all([
+    /** sRGB diffuse used on a flat wall art / UI plane — no repeat, no flipY toggling. */
+    const loadSrgbImage = (relPath) =>
+        new Promise((resolve) => {
+            texLoader.load(
+                relPath,
+                (t) => {
+                    t.colorSpace = THREE.SRGBColorSpace;
+                    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+                    const maxA = renderer.capabilities.getMaxAnisotropy?.() ?? 4;
+                    t.anisotropy = Math.min(4, maxA);
+                    resolve(t);
+                },
+                undefined,
+                () => resolve(null)
+            );
+        });
+
+    const [woodFloor, breweryFloor, metal, posterAstral, posterAstro, posterNova] = await Promise.all([
         loadTex('assets/textures/wood_floor_worn_diff_1k.jpg', 10, 12),
         loadTex('assets/textures/asphalt_floor_diff_1k.jpg', 14, 14),
         loadTex('assets/textures/metal_grate_rusty_diff_1k.jpg', 1.5, 1.5),
+        loadSrgbImage('assets/posters/astral_brew.png'),
+        loadSrgbImage('assets/posters/astro_beer.png'),
+        loadSrgbImage('assets/posters/nova_lager.png'),
     ]);
 
     textures.woodFloor = woodFloor;
     textures.breweryFloor = breweryFloor;
     textures.metal = metal;
+    textures.posters.astralBrew = posterAstral;
+    textures.posters.astroBeer = posterAstro;
+    textures.posters.novaLager = posterNova;
 
     // Image-based lighting (no external HDR file)
     const pmrem = new THREE.PMREMGenerator(renderer);

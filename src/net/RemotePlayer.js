@@ -12,7 +12,7 @@
 
 import * as THREE from 'three';
 import { clone as cloneSkinnedHierarchy } from 'three/addons/utils/SkeletonUtils.js';
-import { PATRON_TINT_COLORS } from '../PatronColors.js';
+import { PATRON_TINT_COLORS, BLUE_SUIT_COLOR_INDEX } from '../PatronColors.js';
 
 const LERP_POS = 14;      // higher = snappier catch-up
 const LERP_YAW = 12;
@@ -23,9 +23,13 @@ const WALK_FADE_SEC = 0.18;
  * brewers stay visually distinct without their diffuse texture washing out.
  * `tintStrength` is 0..1 — 0 leaves the texture alone (local look), 1 applies
  * the full PATRON_TINT_COLORS value (same mode patrons use).
+ *
+ * When `bluesuitMap` is provided, every material's base colour map is
+ * replaced with it (no tint) — used by the blue outfit slot, which has a
+ * bespoke brewer atlas rather than relying on a multiplicative tint.
  */
-function tintMaterials(root, tint, tintStrength = 1) {
-    const tintMul = tint && tintStrength > 0
+function tintMaterials(root, tint, tintStrength = 1, bluesuitMap = null) {
+    const tintMul = !bluesuitMap && tint && tintStrength > 0
         ? new THREE.Color().copy(tint).lerp(new THREE.Color(1, 1, 1), 1 - tintStrength)
         : null;
     root.traverse((ch) => {
@@ -35,7 +39,15 @@ function tintMaterials(root, tint, tintStrength = 1) {
         const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
         const cloned = mats.map((m) => {
             const mat = m.clone();
-            if (mat.map) mat.map = mat.map.clone();
+            if (bluesuitMap && mat.map) {
+                // Share the already-loaded bluesuit atlas across every remote
+                // avatar using this slot — each RemotePlayer instance clones
+                // the material but the underlying GPU texture is the same.
+                mat.map = bluesuitMap;
+                mat.color?.setHex?.(0xffffff);
+            } else if (mat.map) {
+                mat.map = mat.map.clone();
+            }
             mat.envMapIntensity = (mat.envMapIntensity ?? 1) * 0.9;
             mat.depthWrite = true;
             mat.depthTest = true;
@@ -109,7 +121,14 @@ export class RemotePlayer {
         const tint = new THREE.Color(
             PATRON_TINT_COLORS[this.colorIndex % PATRON_TINT_COLORS.length] || 0xffffff
         );
-        tintMaterials(root, tint, useBrewer ? 0.55 : 1.0);
+        // Brewer + "blue" slot = swap the diffuse to the bluesuit atlas so
+        // other players see the same uniform the local blue brewer wears
+        // (with no extra blue tint stacked on top).
+        const bluesuitMap =
+            useBrewer && this.colorIndex === BLUE_SUIT_COLOR_INDEX
+                ? assetBucket?.brewerTemplate?.diffuseVariants?.blueSuit || null
+                : null;
+        tintMaterials(root, tint, useBrewer ? 0.55 : 1.0, bluesuitMap);
         // Brewer template sets a specific position.y so the mesh's feet sit at
         // y=0; preserve that or the avatar sinks into the floor.
         root.position.set(this.targetPos.x, root.position.y, this.targetPos.z);
@@ -260,7 +279,11 @@ export class RemotePlayer {
                 if (ch.geometry && !ch.geometry.userData?.shared) ch.geometry.dispose?.();
                 const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
                 for (const m of mats) {
-                    if (m?.map) m.map.dispose?.();
+                    // Shared atlases (e.g. the blue-outfit brewer diffuse)
+                    // are owned by the asset template — don't dispose them
+                    // when a remote peer disconnects, or the next blue
+                    // brewer to join will render black.
+                    if (m?.map && !m.map.userData?.shared) m.map.dispose?.();
                     m?.dispose?.();
                 }
             });

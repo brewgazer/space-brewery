@@ -2950,5 +2950,314 @@ export class World {
         mat.position.set(0, 0.012, 22.5);
         mat.userData._staticScenery = true;
         this.scene.add(mat);
+
+        this._buildTaproomWallArt();
+    }
+
+    /**
+     * Taproom wall dressing: three framed posters + circular "portholes" that
+     * look out into deep space. The portholes share a procedural starfield
+     * canvas texture and sit flush against the curved outer wall / divider
+     * so the walls read as an orbital station hull rather than a flat
+     * interior. No physics changes — everything here is decorative and
+     * frozen into `_staticEnvMeshes` so matrices aren't rebuilt each frame.
+     */
+    _buildTaproomWallArt() {
+        const tap = this._taproom;
+        if (!tap) return;
+
+        const posters = this.assets?.textures?.posters || {};
+        const spaceTex = this._getSpaceWindowTexture();
+
+        /**
+         * Frame + glass assembly for one round porthole. The "glass" is just a
+         * radial gradient + stars; the frame is an emissive torus so the
+         * window reads even in dim taproom lighting.
+         */
+        const buildPorthole = (radius) => {
+            const group = new THREE.Group();
+            const disc = new THREE.Mesh(
+                new THREE.CircleGeometry(radius, 40),
+                new THREE.MeshBasicMaterial({
+                    map: spaceTex,
+                    toneMapped: false,
+                    depthWrite: false,
+                })
+            );
+            disc.position.z = 0.01;
+            group.add(disc);
+
+            const innerFrame = new THREE.Mesh(
+                new THREE.TorusGeometry(radius * 1.02, radius * 0.06, 10, 40),
+                new THREE.MeshStandardMaterial({
+                    color: 0xc8d4e0,
+                    metalness: 0.85,
+                    roughness: 0.28,
+                    envMapIntensity: 1.1,
+                    emissive: 0x112233,
+                    emissiveIntensity: 0.25,
+                })
+            );
+            innerFrame.position.z = 0.03;
+            group.add(innerFrame);
+
+            const outerFrame = new THREE.Mesh(
+                new THREE.TorusGeometry(radius * 1.15, radius * 0.05, 10, 40),
+                new THREE.MeshStandardMaterial({
+                    color: 0x2a3548,
+                    metalness: 0.65,
+                    roughness: 0.36,
+                    emissive: 0x5effd4,
+                    emissiveIntensity: 0.45,
+                })
+            );
+            outerFrame.position.z = 0.02;
+            group.add(outerFrame);
+
+            const rim = new THREE.Mesh(
+                new THREE.RingGeometry(radius * 1.04, radius * 1.12, 40, 1),
+                new THREE.MeshBasicMaterial({
+                    color: 0x101820,
+                    side: THREE.DoubleSide,
+                    depthWrite: false,
+                })
+            );
+            rim.position.z = 0.015;
+            group.add(rim);
+
+            return group;
+        };
+
+        /**
+         * Build a framed poster with the given sRGB texture. Sized to the
+         * taproom's eye-level wall art — ~1.1 m wide, 1.65 m tall (portrait),
+         * with a thin metallic frame so it doesn't blend into the hull panels.
+         */
+        const buildPoster = (texture, width = 1.1, height = 1.65) => {
+            const group = new THREE.Group();
+            const plane = new THREE.Mesh(
+                new THREE.PlaneGeometry(width, height),
+                new THREE.MeshBasicMaterial({
+                    map: texture,
+                    toneMapped: false,
+                    depthWrite: false,
+                })
+            );
+            plane.position.z = 0.02;
+            group.add(plane);
+
+            const frameMat = new THREE.MeshStandardMaterial({
+                color: 0x1a2234,
+                metalness: 0.72,
+                roughness: 0.36,
+                emissive: 0xffcc66,
+                emissiveIntensity: 0.18,
+            });
+            const ft = 0.06; // frame thickness
+            const fd = 0.04; // frame depth
+            const top = new THREE.Mesh(
+                new THREE.BoxGeometry(width + ft * 2, ft, fd), frameMat
+            );
+            top.position.set(0, height / 2 + ft / 2, 0.02);
+            group.add(top);
+            const bot = top.clone();
+            bot.position.y = -(height / 2 + ft / 2);
+            group.add(bot);
+            const left = new THREE.Mesh(
+                new THREE.BoxGeometry(ft, height + ft * 2, fd), frameMat
+            );
+            left.position.set(-(width / 2 + ft / 2), 0, 0.02);
+            group.add(left);
+            const right = left.clone();
+            right.position.x = width / 2 + ft / 2;
+            group.add(right);
+
+            return group;
+        };
+
+        /**
+         * Place `obj` flat against the inner surface of the elliptical
+         * taproom wall at parameter `t` (0..π). The object's local +Z is
+         * oriented toward the room interior and its position is nudged
+         * slightly off the wall so it never z-fights against the hull.
+         */
+        const mountOnCurvedWall = (obj, t, yCenter, inwardOffset = 0.18) => {
+            const rx = tap.ellipseRx;
+            const rz = tap.ellipseRz;
+            const wallX = rx * Math.cos(t);
+            const wallZ = tap.dividerZ + rz * Math.sin(t);
+            // Inward direction is the ellipse normal (x/rx², z/rz²) inverted
+            // and normalised — gives a visually correct facing even though
+            // the wall isn't a true circle.
+            let nx = -Math.cos(t) / rx;
+            let nz = -Math.sin(t) / rz;
+            const nlen = Math.hypot(nx, nz) || 1;
+            nx /= nlen; nz /= nlen;
+            obj.position.set(wallX + nx * inwardOffset, yCenter, wallZ + nz * inwardOffset);
+            // Yaw so the local +Z axis aligns with the inward normal: default
+            // three.js plane/circle normal is +Z, matching our disc meshes.
+            obj.rotation.y = Math.atan2(nx, nz);
+        };
+
+        const addStatic = (obj) => {
+            obj.userData._staticScenery = true;
+            this.scene.add(obj);
+            // _freezeStaticScenery() walks every `_staticScenery` group at
+            // the end of the constructor, so we don't need to append to
+            // `_staticEnvMeshes` for matrix freezing here.
+        };
+
+        // Portholes along the curved wall. Entrance gap lives around t=π/2,
+        // so these are spaced away from the apex on both sides.
+        /** @type {Array<{ t: number, y: number, r: number }>} */
+        const portholeSpots = [
+            { t: 0.08 * Math.PI, y: 2.35, r: 0.62 },
+            { t: 0.30 * Math.PI, y: 2.55, r: 0.78 },
+            { t: 0.70 * Math.PI, y: 2.55, r: 0.78 },
+            { t: 0.92 * Math.PI, y: 2.35, r: 0.62 },
+        ];
+        for (const spot of portholeSpots) {
+            const p = buildPorthole(spot.r);
+            mountOnCurvedWall(p, spot.t, spot.y, 0.16);
+            addStatic(p);
+        }
+
+        // Posters — two on the curved wall (between portholes) and one on
+        // the divider wall facing the taproom interior. Only added if the
+        // source texture actually loaded, so a missing PNG doesn't spawn a
+        // solid black rectangle.
+        const curvedPosters = [
+            { t: 0.20 * Math.PI, y: 2.15, texture: posters.astroBeer },
+            { t: 0.80 * Math.PI, y: 2.15, texture: posters.novaLager },
+        ];
+        for (const p of curvedPosters) {
+            if (!p.texture) continue;
+            const poster = buildPoster(p.texture);
+            mountOnCurvedWall(poster, p.t, p.y, 0.22);
+            addStatic(poster);
+        }
+
+        // Divider wall (z = dividerZ) with flat normal facing +Z. Positioned
+        // on the east half so it doesn't crowd the existing BREW MANIFEST
+        // chalkboard at x = -10.
+        if (posters.astralBrew) {
+            const poster = buildPoster(posters.astralBrew);
+            poster.position.set(6, 2.15, tap.dividerZ + 0.19);
+            // Plane default normal is +Z, which already faces the taproom.
+            addStatic(poster);
+        }
+    }
+
+    /**
+     * Procedural starfield for the porthole "windows". Renders once, cached
+     * on the World instance, and shared by every porthole mesh so we only
+     * upload one texture to the GPU. Content: dark indigo vignette, scatter
+     * of bright stars, a couple of nebula smudges and a faint ringed planet
+     * silhouette so each window reads as "looking into space".
+     */
+    _getSpaceWindowTexture() {
+        if (this._spaceWindowTexture) return this._spaceWindowTexture;
+
+        const size = 512;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = size;
+        const ctx = canvas.getContext('2d');
+
+        // Radial vignette: deep indigo centre fading to near-black edges so
+        // the disc reads as a round porthole rather than a square swatch.
+        const bg = ctx.createRadialGradient(
+            size * 0.5, size * 0.5, size * 0.1,
+            size * 0.5, size * 0.5, size * 0.5
+        );
+        bg.addColorStop(0, '#1a1838');
+        bg.addColorStop(0.55, '#070616');
+        bg.addColorStop(1, '#020108');
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, size, size);
+
+        // Faint nebula smudges.
+        const nebulae = [
+            { x: 0.32, y: 0.36, r: 0.28, col: 'rgba(120, 80, 200, 0.18)' },
+            { x: 0.72, y: 0.66, r: 0.32, col: 'rgba(60, 150, 220, 0.16)' },
+            { x: 0.55, y: 0.22, r: 0.18, col: 'rgba(220, 120, 180, 0.12)' },
+        ];
+        for (const n of nebulae) {
+            const g = ctx.createRadialGradient(
+                n.x * size, n.y * size, 2,
+                n.x * size, n.y * size, n.r * size
+            );
+            g.addColorStop(0, n.col);
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, size, size);
+        }
+
+        // Stars — deterministic layout via a simple LCG so every porthole
+        // shows the same view (they're all "looking out" through the hull).
+        let seed = 1337;
+        const rand = () => {
+            seed = (seed * 1664525 + 1013904223) >>> 0;
+            return seed / 0xffffffff;
+        };
+        for (let i = 0; i < 320; i++) {
+            const x = rand() * size;
+            const y = rand() * size;
+            const r = rand() * 1.2 + 0.2;
+            const a = rand() * 0.7 + 0.25;
+            ctx.fillStyle = `rgba(255, 245, 230, ${a})`;
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        // A dozen brighter "beacon" stars with a subtle halo.
+        for (let i = 0; i < 12; i++) {
+            const x = rand() * size;
+            const y = rand() * size;
+            const g = ctx.createRadialGradient(x, y, 0, x, y, 6);
+            g.addColorStop(0, 'rgba(255,255,255,1)');
+            g.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Ringed planet in the lower-right-ish area for visual anchoring.
+        const pcx = size * 0.66;
+        const pcy = size * 0.72;
+        const pr = size * 0.12;
+        const planetGrad = ctx.createRadialGradient(
+            pcx - pr * 0.35, pcy - pr * 0.35, pr * 0.1,
+            pcx, pcy, pr
+        );
+        planetGrad.addColorStop(0, '#f0c078');
+        planetGrad.addColorStop(0.55, '#c87848');
+        planetGrad.addColorStop(1, '#331810');
+        ctx.fillStyle = planetGrad;
+        ctx.beginPath();
+        ctx.arc(pcx, pcy, pr, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.save();
+        ctx.translate(pcx, pcy);
+        ctx.rotate(-0.35);
+        ctx.scale(1, 0.22);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(230, 200, 150, 0.65)';
+        ctx.beginPath();
+        ctx.arc(0, 0, pr * 1.55, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(255, 230, 190, 0.9)';
+        ctx.beginPath();
+        ctx.arc(0, 0, pr * 1.72, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.needsUpdate = true;
+        this._spaceWindowTexture = tex;
+        return tex;
     }
 }

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clone as cloneSkinnedHierarchy } from 'three/addons/utils/SkeletonUtils.js';
-import { PATRON_TINT_COLORS } from './PatronColors.js';
+import { PATRON_TINT_COLORS, BLUE_SUIT_COLOR_INDEX } from './PatronColors.js';
 
 export class Player {
     constructor(camera, scene, colliders, lockTarget = document.body) {
@@ -147,7 +147,11 @@ export class Player {
                 if (ch.geometry && !ch.geometry.userData?.shared) ch.geometry.dispose?.();
                 const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
                 for (const m of mats) {
-                    if (m?.map) m.map.dispose?.();
+                    // Textures flagged `shared` are owned by the asset
+                    // template (e.g. the blue-suit atlas) and re-used by
+                    // every subsequent spawn. Disposing them here would
+                    // invalidate the template for future color picks.
+                    if (m?.map && !m.map.userData?.shared) m.map.dispose?.();
                     m?.dispose?.();
                 }
             });
@@ -218,12 +222,32 @@ export class Player {
         };
 
         if (useBrewer) {
+            // The blue colour slot has a bespoke diffuse atlas; swap the map
+            // per-material rather than multiplying the default diffuse by a
+            // blue tint (which doubled up the blue and read muddy). Every
+            // other slot keeps the default texture untinted — we don't have
+            // atlases for those yet.
+            const blueSuitTex =
+                colorIndex === BLUE_SUIT_COLOR_INDEX
+                    ? brew?.diffuseVariants?.blueSuit || null
+                    : null;
             root.traverse((ch) => {
                 if (ch.isMesh && ch.material) {
                     ch.castShadow = false;
                     ch.receiveShadow = false;
                     const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
-                    ch.material = mats.map((m) => fixAvatarMaterial(m, 0.9));
+                    ch.material = mats.map((m) => {
+                        const mat = fixAvatarMaterial(m, 0.9);
+                        if (blueSuitTex && mat.map) {
+                            mat.map.dispose?.();
+                            mat.map = blueSuitTex;
+                            // Neutralise any lingering colour bias on the
+                            // material so the atlas shows through cleanly.
+                            mat.color?.setHex?.(0xffffff);
+                            mat.needsUpdate = true;
+                        }
+                        return mat;
+                    });
                     ch.material = ch.material.length === 1 ? ch.material[0] : ch.material;
                 }
             });
