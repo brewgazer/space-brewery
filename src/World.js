@@ -419,12 +419,10 @@ export class World {
         this.scene.add(floor);
         this._staticEnvMeshes.push(floor);
 
-        const ceil = new THREE.Mesh(
-            new THREE.PlaneGeometry(RW, RD),
-            new THREE.MeshBasicMaterial({ color: 0x2a2438 })
-        );
+        const ceil = new THREE.Mesh(new THREE.PlaneGeometry(RW, RD), this._spaceCeilingMaterial());
         ceil.rotation.x = Math.PI / 2;
         ceil.position.y = ROOM_CEILING_Y;
+        ceil.name = 'BuildingCeiling';
         this.scene.add(ceil);
         this._staticEnvMeshes.push(ceil);
 
@@ -649,11 +647,6 @@ export class World {
         this.scene.add(tf);
         this._staticEnvMeshes.push(tf);
 
-        // Space-themed ceiling for the taproom only — brewery side keeps the
-        // default flat ceiling. Sits 2 cm below ROOM_CEILING_Y so it sits in
-        // front of the default rectangular ceiling without z-fighting.
-        this._buildTaproomCeiling(TAP_RX - 0.05, TAP_RZ - 0.05, DIVIDER_Z);
-
         // Portal door sits in the south entrance gap — customers spawn just
         // behind it (south, outside the taproom) and walk through it toward
         // their bar spot, so it reads as the way they "come through" into the
@@ -802,61 +795,33 @@ export class World {
     }
 
     /**
-     * Space-themed ceiling that only covers the taproom (half-ellipse on +Z
-     * side of the divider). Same fan-triangulation as the floor, but with the
-     * triangle winding flipped so the texture faces DOWN into the room. Uses
-     * textures extracted from need_some_space.glb when available; otherwise
-     * falls back to a deep purple matte ceiling that matches the room's tone.
+     * Cached material for the whole-building ceiling. Pulls PBR maps out of
+     * the `spaceCeiling` texture slot (populated from need_some_space.glb in
+     * AssetLoader) and drives them with an emissive channel so the stars
+     * actually glow instead of reading as a dull matte plane. Falls back to
+     * a deep purple matte if the GLB failed to load.
      */
-    _buildTaproomCeiling(rx, rz, cz) {
-        const SEG = 48;
-        const positions = [];
-        const uvs = [];
-        const indices = [];
-        positions.push(0, 0, cz);
-        uvs.push(0.5, 0.0);
-        for (let i = 0; i <= SEG; i++) {
-            const t = Math.PI * (i / SEG);
-            const x = rx * Math.cos(t);
-            const z = cz + rz * Math.sin(t);
-            positions.push(x, 0, z);
-            uvs.push((x + rx) / (rx * 2), (z - cz) / rz);
-        }
-        // Flip winding so the plane's normal points DOWN (−Y) — the ceiling
-        // needs to face into the room, not up toward the sky.
-        for (let i = 1; i <= SEG; i++) {
-            indices.push(0, i + 1, i);
-        }
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-        geo.setIndex(indices);
-        geo.computeVertexNormals();
-
+    _spaceCeilingMaterial() {
+        if (this._ceilingMat) return this._ceilingMat;
         const sc = this.assets?.textures?.spaceCeiling || {};
         const hasTex = !!(sc.map || sc.emissiveMap);
-        const mat = hasTex
-            ? new THREE.MeshStandardMaterial({
-                map: sc.map || null,
-                normalMap: sc.normalMap || null,
-                roughnessMap: sc.roughnessMap || null,
-                emissiveMap: sc.emissiveMap || sc.map || null,
-                emissive: new THREE.Color(0xffffff),
-                emissiveIntensity: sc.emissiveMap ? 1.0 : 0.55,
-                roughness: 0.85,
-                metalness: 0.0,
-                envMapIntensity: 0.0,
-                side: THREE.FrontSide,
-            })
-            : new THREE.MeshBasicMaterial({ color: 0x1a1430 });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.y = ROOM_CEILING_Y - 0.02;
-        mesh.receiveShadow = false;
-        mesh.castShadow = false;
-        mesh.name = 'TaproomCeiling';
-        this.scene.add(mesh);
-        this._staticEnvMeshes.push(mesh);
-        return mesh;
+        if (!hasTex) {
+            this._ceilingMat = new THREE.MeshBasicMaterial({ color: 0x1a1430 });
+            return this._ceilingMat;
+        }
+        this._ceilingMat = new THREE.MeshStandardMaterial({
+            map: sc.map || null,
+            normalMap: sc.normalMap || null,
+            roughnessMap: sc.roughnessMap || null,
+            emissiveMap: sc.emissiveMap || sc.map || null,
+            emissive: new THREE.Color(0xffffff),
+            emissiveIntensity: sc.emissiveMap ? 1.0 : 0.55,
+            roughness: 0.85,
+            metalness: 0.0,
+            envMapIntensity: 0.0,
+            side: THREE.FrontSide,
+        });
+        return this._ceilingMat;
     }
 
     // ─── brew stations ──────────────────────────────────────
