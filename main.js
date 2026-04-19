@@ -681,6 +681,82 @@ function updateMultiplayerBanner() {
     banner.style.display = 'block';
 }
 
+/**
+ * Fullscreen intro cinematic shown right after the user clicks "Start brewing".
+ * Resolves when the video finishes, is skipped with Space / Enter, or fails to
+ * play (so a broken asset can never strand the player on a black screen).
+ */
+function playIntroVideo() {
+    return new Promise((resolve) => {
+        const overlay = document.getElementById('intro-video-overlay');
+        const video = document.getElementById('intro-video');
+        if (!overlay || !video) {
+            resolve();
+            return;
+        }
+
+        let done = false;
+        const finish = () => {
+            if (done) return;
+            done = true;
+            window.removeEventListener('keydown', onKey, true);
+            video.removeEventListener('ended', finish);
+            video.removeEventListener('error', finish);
+            try { video.pause(); } catch (_) {}
+            overlay.classList.remove('active');
+            // Release the frame so the next play-through starts from 0 without
+            // a lingering still of the last frame.
+            try { video.currentTime = 0; } catch (_) {}
+            resolve();
+        };
+
+        const onKey = (e) => {
+            // Only Space or Enter skips — prevents stray clicks or movement
+            // keys from cutting the intro short.
+            if (e.code === 'Space' || e.code === 'Enter' || e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                finish();
+            }
+        };
+
+        // Hide every start-screen panel while the cinematic plays. beginPlaySession
+        // repeats these hides after the await, but doing it now prevents a flash
+        // of the character-select panel behind the video on slow machines.
+        hideCharacterSelectPanel?.();
+        if (startScreen) startScreen.style.display = 'none';
+
+        overlay.classList.add('active');
+        video.muted = false;
+        video.currentTime = 0;
+        video.addEventListener('ended', finish);
+        video.addEventListener('error', finish);
+        window.addEventListener('keydown', onKey, true);
+
+        const playPromise = video.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(() => {
+                // Autoplay with sound can be blocked if the user hasn't
+                // interacted yet. Fall back to muted playback so the cinematic
+                // still runs instead of hanging the start button.
+                try {
+                    video.muted = true;
+                    video.play().catch(() => finish());
+                } catch (_) {
+                    finish();
+                }
+            });
+        }
+
+        // Hard safety net: if the video metadata never loads (e.g. asset
+        // missing on a stale deploy), bail out after 2 seconds so the player
+        // isn't stuck staring at black.
+        setTimeout(() => {
+            if (!done && video.readyState < 2 && video.paused) finish();
+        }, 2000);
+    });
+}
+
 async function beginPlaySession(fromSave) {
     if (!gameReady) {
         if (loadingLine) {
@@ -694,6 +770,11 @@ async function beginPlaySession(fromSave) {
     // yet, so it's cleaner to ignore local saves.
     const isJoiner = pendingSession.role === 'join';
     if (isJoiner) fromSave = false;
+
+    // Transition cinematic: play the intro video before anything else so the
+    // renderer, network, and audio systems don't start until the user has
+    // watched (or skipped) it. Space/Enter skips.
+    await playIntroVideo();
 
     // Kick off the networking session before we touch gameplay state so a
     // failure surfaces before the renderer hands over pointer-lock.
