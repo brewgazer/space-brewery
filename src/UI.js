@@ -75,6 +75,32 @@ export class UI {
         this._pauseActions = actions;
     }
 
+    /**
+     * Lock down the pause menu for joiners so they can't abandon the host's
+     * session, mutate the host's save, or tweak audio/sensitivity sliders
+     * that would also open as pointer-unlocking panels. The "Resume" button
+     * stays visible so the player can still re-lock the pointer after an
+     * accidental Escape.
+     */
+    setPauseRestrictedMode(restricted) {
+        this._pauseRestricted = !!restricted;
+        const hide = (el) => {
+            if (el) el.style.display = restricted ? 'none' : '';
+        };
+        hide(this.elements.pauseAudioBtn);
+        hide(this.elements.pauseRestart);
+        hide(this.elements.pauseRestartDay);
+        hide(this.elements.pauseSaveExit);
+        // The audio/settings sub-panel is reached from pauseAudioBtn so
+        // make sure it closes if it happened to be open.
+        if (restricted && this.elements.pauseAudioPanel) {
+            this.elements.pauseAudioPanel.style.display = 'none';
+        }
+        if (restricted && this.elements.pauseMainPanel) {
+            this.elements.pauseMainPanel.style.display = 'flex';
+        }
+    }
+
     /** @returns {boolean} true if Escape was consumed (e.g. closed audio panel) */
     handlePauseEscape() {
         if (!this.elements.pauseAudioPanel || this.elements.pauseAudioPanel.style.display === 'none') {
@@ -1070,20 +1096,33 @@ export class UI {
             'The ingredient bucket appears by the bins when bought.</div>';
 
         html += '<div style="color:#aaa;font-size:12px;margin:10px 0 6px;">Catalog</div>';
+        const bucketsOwned = Math.max(0, Math.floor(gs.bucketsPurchased || 0));
         STORE_OBJECT_DEFS.forEach((obj, i) => {
-            const have = ownedObjects.has(obj.id);
+            const stackable = obj.stackable === true;
+            const have = !stackable && ownedObjects.has(obj.id);
+            // Stackable items always show the hotkey — you can keep buying them.
             const keyLabel = i < 9 ? i + 1 : i === 9 ? 0 : null;
-            const keyHtml =
-                keyLabel != null && !have
-                    ? `<span style="color:#ffd700;font-weight:bold;">[${keyLabel}]</span> `
-                    : '';
+            const showKey = keyLabel != null && (stackable || !have);
+            const keyHtml = showKey
+                ? `<span style="color:#ffd700;font-weight:bold;">[${keyLabel}]</span> `
+                : '';
+            let priceHtml;
+            if (stackable) {
+                const countLabel =
+                    bucketsOwned > 0
+                        ? ` <span style="color:#6c8;font-size:12px;">(own ${bucketsOwned})</span>`
+                        : '';
+                priceHtml = `<span style="color:#88ccff;">$${obj.cost}</span>${countLabel}`;
+            } else if (have) {
+                priceHtml = '<span style="color:#6c8;">(owned)</span>';
+            } else {
+                priceHtml = `<span style="color:#88ccff;">$${obj.cost}</span>`;
+            }
             html +=
                 `<div style="margin:8px 0;padding:6px 0;border-bottom:1px solid rgba(80,100,120,0.25);">` +
                 keyHtml +
                 `<span style="color:#fff;">${obj.name}</span> ` +
-                (have
-                    ? '<span style="color:#6c8;">(owned)</span>'
-                    : `<span style="color:#88ccff;">$${obj.cost}</span>`) +
+                priceHtml +
                 `<div style="color:#8ab;font-size:12px;margin-top:4px;">${obj.blurb}</div></div>`;
         });
         html += backLine;

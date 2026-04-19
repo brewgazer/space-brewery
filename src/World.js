@@ -1114,18 +1114,33 @@ export class World {
     }
 
     /**
-     * After load or purchase: one floor bucket if the player owns it and is not already holding it.
+     * After load or purchase: make sure the world has `bucketsPurchased` loose
+     * buckets on the floor (minus any the player is currently carrying and any
+     * locked at the grain mill). Multiplayer teams buy several so each brewer
+     * can grab one; the floor row fans out so they don't z-fight.
      */
     syncOwnedStorePickups(gameState, assetBucket) {
-        const owned = gameState.ownedObjectIds || [];
-        if (!owned.includes('grainBucket')) return;
+        const targetCount = Math.max(
+            0,
+            Math.floor(gameState.bucketsPurchased || 0)
+        );
+        // Count only free-standing buckets — skip the mill-locked one so that
+        // dumping a bucket into the mill doesn't cause a fresh spawn.
+        const existingFree = this.interactables.filter(
+            (i) => i.userData?.type === 'looseGrainBucket' && !i.userData?.millLocked
+        ).length;
+        const carrying = gameState.player.carrying?.type === 'bucket' ? 1 : 0;
+        const want = targetCount - carrying;
+        if (existingFree >= want) return;
 
-        const carrying = gameState.player.carrying?.type === 'bucket';
-        const hasLoose = this.interactables.some((i) => i.userData?.type === 'looseGrainBucket');
-        if (carrying || hasLoose) return;
-
-        const pos = this.grainBucketFloorPosition || new THREE.Vector3(12.3, 0, -21);
-        this.spawnGrainBucketLoose(assetBucket?.grainBucketTemplate ?? null, pos, [null, null, null]);
+        const basePos = this.grainBucketFloorPosition || new THREE.Vector3(12.3, 0, -21);
+        const tpl = assetBucket?.grainBucketTemplate ?? null;
+        for (let i = existingFree; i < want; i++) {
+            // Offset along +Z so multiple buckets line up beside the bins.
+            const offset = i * 0.7;
+            const pos = new THREE.Vector3(basePos.x, basePos.y, basePos.z + offset);
+            this.spawnGrainBucketLoose(tpl, pos, [null, null, null]);
+        }
     }
 
     /**

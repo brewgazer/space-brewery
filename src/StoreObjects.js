@@ -8,8 +8,16 @@ export const STORE_OBJECT_DEFS = [
     {
         id: 'grainBucket',
         name: 'Ingredient bucket',
-        cost: 150,
-        blurb: 'Hit each ingredient bin to load all three into the bucket, carry to the grain mill, and dump — faster than three separate trips.',
+        cost: 75,
+        /**
+         * Stackable: every teammate in a multiplayer session likely wants
+         * their own bucket, so the supply terminal lets you re-buy this one.
+         * Each purchase drops another bucket on the floor by the bins. The
+         * count is tracked per-tab in `gameState.bucketsPurchased`, not in
+         * the shared `ownedObjectIds` set.
+         */
+        stackable: true,
+        blurb: 'Hit each ingredient bin to load all three into the bucket, carry to the grain mill, and dump. One bucket per brewer — buy extras so everyone on the server has their own.',
     },
     {
         id: 'fermenter_slot_1',

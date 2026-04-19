@@ -40,6 +40,9 @@ export class NetManager {
         this._status = 'idle';           // 'idle' | 'hosting' | 'joined' | 'error'
         this._statusMessage = '';
         this._serverListListeners = new Set();
+        this._hostEventListeners = new Set();
+        this._clientRequestListeners = new Set();
+        this._peerJoinedListeners = new Set();
     }
 
     get mode() { return this._mode; }
@@ -237,7 +240,48 @@ export class NetManager {
                     try { cb({ kind: 'kicked', reason }); } catch (_) { /* ignore */ }
                 }
             },
+            onHostEvent: (payload) => {
+                for (const cb of this._hostEventListeners) {
+                    try { cb(payload); } catch (err) { console.warn('host-event listener', err); }
+                }
+            },
+            onClientRequest: (peerId, payload) => {
+                for (const cb of this._clientRequestListeners) {
+                    try { cb(peerId, payload); } catch (err) { console.warn('client-request listener', err); }
+                }
+            },
+            onPeerJoined: (peerId) => {
+                for (const cb of this._peerJoinedListeners) {
+                    try { cb(peerId); } catch (err) { console.warn('peer-joined listener', err); }
+                }
+            },
         });
+    }
+
+    /** Client: fires when the host broadcasts a gameplay event (economy state, purchase ack, …). */
+    onHostEvent(cb) {
+        this._hostEventListeners.add(cb);
+        return () => this._hostEventListeners.delete(cb);
+    }
+
+    /** Host: fires when a client sends a request (purchase/spend). */
+    onClientRequest(cb) {
+        this._clientRequestListeners.add(cb);
+        return () => this._clientRequestListeners.delete(cb);
+    }
+
+    /** Host: fires when a new peer successfully joins — useful for pushing initial state. */
+    onPeerJoined(cb) {
+        this._peerJoinedListeners.add(cb);
+        return () => this._peerJoinedListeners.delete(cb);
+    }
+
+    sendHostEvent(payload, opts = {}) {
+        this._transport?.sendHostEvent?.(payload, opts);
+    }
+
+    sendClientRequest(payload) {
+        this._transport?.sendClientRequest?.(payload);
     }
 
     _setRemoteState(peerId, state) {

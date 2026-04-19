@@ -110,6 +110,7 @@ export function buildSaveSnapshot(world, gameState, waveManager, grainMillSystem
         },
         unlockedRecipeIds: [...(gameState.unlockedRecipeIds || [])],
         ownedObjectIds: [...(gameState.ownedObjectIds || [])],
+        bucketsPurchased: Math.max(0, Math.floor(gameState.bucketsPurchased || 0)),
         equipmentPlacements: Object.fromEntries(
             Object.entries(gameState.equipmentPlacements || {}).map(([k, v]) => [
                 k,
@@ -385,6 +386,22 @@ export function applySaveSnapshot(saved, ctx) {
         ? [...new Set(saved.ownedObjectIds.map(String))]
         : [];
 
+    // Bucket moved out of ownedObjectIds in v3.1 — it's now stackable and
+    // tracked per-player in `bucketsPurchased`. Migrate legacy saves so an
+    // existing brewer doesn't lose their bucket.
+    const hadLegacyBucket = gameState.ownedObjectIds.includes('grainBucket');
+    if (hadLegacyBucket) {
+        gameState.ownedObjectIds = gameState.ownedObjectIds.filter(
+            (id) => id !== 'grainBucket'
+        );
+    }
+    const savedBuckets = Number(saved.bucketsPurchased);
+    if (Number.isFinite(savedBuckets) && savedBuckets >= 0) {
+        gameState.bucketsPurchased = Math.floor(savedBuckets);
+    } else {
+        gameState.bucketsPurchased = hadLegacyBucket ? 1 : 0;
+    }
+
     // Restore the player-chosen placements for fermenters / lager tank. Older saves
     // predate the placement system and simply have no entry here → spawns fall back
     // to the original FERM_SLOTS / hard-coded lager-tank positions.
@@ -516,6 +533,7 @@ export function resetToNewGame(ctx) {
     gameState.dayNumber = 1;
     gameState.unlockedRecipeIds = [...STARTER_UNLOCKED_RECIPE_IDS];
     gameState.ownedObjectIds = [];
+    gameState.bucketsPurchased = 0;
     gameState.equipmentPlacements = {};
     world.despawnPurchasedFermentersAndTaps?.();
     gameState.dailyCravings = recipeSystem.generateDailyCravings(1, gameState.unlockedRecipeIds);

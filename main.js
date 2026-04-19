@@ -80,8 +80,14 @@ const gameState = {
     pendingCharacterColorIndex: 0,
     /** Recipe ids the player has purchased — cravings only draw from this set. */
     unlockedRecipeIds: ['lager'],
-    /** Store tools bought at the supply terminal (e.g. grain bucket). */
+    /** Store tools bought at the supply terminal (excludes stackable items like the bucket). */
     ownedObjectIds: [],
+    /**
+     * Stackable bucket count — each bucket is a separate world pickup. Lets every
+     * brewer on a multiplayer server have their own. Tracked per-tab so joiners
+     * can buy their own bucket without it disappearing from the host's tab.
+     */
+    bucketsPurchased: 0,
     /**
      * Player-chosen world positions for placeable equipment (fermenters, lager tank).
      * Keyed by the StoreObjects id (e.g. `fermenter_slot_2`, `lager_tank`).
@@ -119,6 +125,118 @@ const netManager = new NetManager();
 window.__brewNet = netManager; // handy for console debugging
 /** @type {Map<string, RemotePlayer>} */
 const remotePlayers = new Map();
+
+/** Joiners only render shared economy; the host is authoritative. */
+function isJoiner() {
+    return netManager.active && !netManager.isHost;
+}
+
+function isHost() {
+    return netManager.active && netManager.isHost;
+}
+
+/**
+ * Economy fields that stay in sync between every peer in the room. Everything
+ * else (brew-station progress, fermenter progress, wave state, customers) is
+ * host-only simulation for now — joiners just see the fresh world. Buckets are
+ * deliberately NOT included so each teammate can have their own.
+ */
+function snapshotSharedEconomy() {
+    return {
+        money: gameState.player?.money ?? 0,
+        score: gameState.player?.score ?? 0,
+        unlockedRecipeIds: [...(gameState.unlockedRecipeIds || [])],
+        ownedObjectIds: [...(gameState.ownedObjectIds || [])],
+        equipmentPlacements: Object.fromEntries(
+            Object.entries(gameState.equipmentPlacements || {}).map(([k, v]) => [
+                k,
+                { x: v.x, z: v.z, yaw: v.yaw ?? 0 },
+            ])
+        ),
+        kegs: (gameState.kegs || []).map((k) => ({
+            id: k.id,
+            recipeId: k.recipe?.id,
+            servings: k.servings,
+            batchValid: k.batchValid !== false,
+            premiumLager: k.premiumLager === true,
+        })),
+        dayNumber: gameState.dayNumber,
+    };
+}
+
+let _lastEconomyBroadcastMs = 0;
+
+function broadcastEconomyIfHost() {
+    if (!isHost()) return;
+    _lastEconomyBroadcastMs = performance.now();
+    netManager.sendHostEvent({
+        kind: 'economy-state',
+        state: snapshotSharedEconomy(),
+    });
+}
+
+/**
+ * Apply an economy snapshot received from the host. Mirrors money, recipe
+ * unlocks, equipment ownership, kegs, and day number onto the joiner's
+ * `gameState`; respawns owned taps/fermenters/lager tank so the joiner's world
+ * matches the host's purchases.
+ */
+function applySharedEconomy(state) {
+    if (!state || !gameState || !world) return;
+    // Guard against mid-join application — the joiner resets their world to
+    // a fresh day inside beginPlaySession AFTER establishNetSession, so an
+    // economy-state that arrives during the join handshake would get blown
+    // away by `resetToNewGame`. The host's 1.5s heartbeat will catch us up
+    // once the session is fully up.
+    if (!gameState.started) return;
+    gameState.player.money = state.money ?? 0;
+    gameState.player.score = state.score ?? 0;
+    gameState.dayNumber = state.dayNumber ?? gameState.dayNumber;
+
+    const prevOwned = new Set(gameState.ownedObjectIds || []);
+    gameState.unlockedRecipeIds = Array.isArray(state.unlockedRecipeIds)
+        ? [...new Set(state.unlockedRecipeIds)]
+        : [];
+    gameState.ownedObjectIds = Array.isArray(state.ownedObjectIds)
+        ? [...new Set(state.ownedObjectIds)]
+        : [];
+    gameState.equipmentPlacements =
+        state.equipmentPlacements && typeof state.equipmentPlacements === 'object'
+            ? { ...state.equipmentPlacements }
+            : {};
+
+    gameState.kegs = (state.kegs || [])
+        .map((k) => {
+            const r = recipeSystem.getRecipeById(k.recipeId);
+            if (!r) return null;
+            return {
+                recipe: r,
+                servings: k.servings ?? 5,
+                id: k.id ?? Date.now(),
+                batchValid: k.batchValid !== false,
+                premiumLager: k.premiumLager === true,
+            };
+        })
+        .filter(Boolean);
+
+    // Detect newly owned equipment → spawn in the joiner's world so they can
+    // actually see the taps/fermenters the host bought.
+    const nowOwned = new Set(gameState.ownedObjectIds);
+    let equipmentChanged = false;
+    for (const id of nowOwned) {
+        if (!prevOwned.has(id)) equipmentChanged = true;
+    }
+    if (equipmentChanged) {
+        world.syncStoreEquipmentFromOwned?.(gameState);
+        syncLagerTankRefs(getPlayCtx());
+        world.syncOwnedStorePickups?.(gameState, gameAssetBucket);
+        buildHitboxCaches();
+        syncInteractableState();
+    }
+    kegSystem._tapsDirty = true;
+    kegSystem?._updateKegVisuals?.();
+    ui.refreshRecipeShopContent();
+}
 
 /**
  * UI wizard state — gathers the user's multiplayer choices before calling
@@ -222,7 +340,8 @@ function tryBuyStoreObject(objectId) {
     const def = getStoreObjectDef(objectId);
     if (!def) return false;
     const owned = gameState.ownedObjectIds || (gameState.ownedObjectIds = []);
-    if (owned.includes(objectId)) {
+    const stackable = def.stackable === true;
+    if (!stackable && owned.includes(objectId)) {
         audioSystem.playError();
         ui.showNotification('You already own this', 'rgba(120,40,40,0.92)', 2000);
         return false;
@@ -237,13 +356,62 @@ function tryBuyStoreObject(objectId) {
     const needsPlacement =
         (def.equipment === 'fermenter' && typeof def.slotIndex === 'number') ||
         def.equipment === 'lagerTank';
+
+    // Joiners: money + recipes + non-stackable equipment come from the host's
+    // shared economy, so route the purchase through the host instead of
+    // mutating local state. Stackable items (the bucket) are per-player —
+    // the joiner still locally spawns one, but the host must approve the
+    // spend against the shared wallet.
+    if (isJoiner()) {
+        if (stackable) {
+            requestSharedSpend(cost, `bucket`, (ok) => {
+                if (!ok) return;
+                gameState.bucketsPurchased = (gameState.bucketsPurchased || 0) + 1;
+                audioSystem.playCashRegister();
+                ui.showNotification(`Purchased: ${def.name} (-$${cost})`, 'rgba(30,90,50,0.92)', 2200);
+                ui.refreshRecipeShopContent();
+                world?.syncOwnedStorePickups?.(gameState, gameAssetBucket);
+                buildHitboxCaches();
+                syncInteractableState();
+            });
+            return true;
+        }
+        if (needsPlacement) {
+            // Fermenters + lager tank need the buyer to pick a floor spot, and
+            // only the host's camera drives the placement ghost. Tell the
+            // joiner to ask the host to buy it instead of silently hijacking
+            // the host's screen.
+            audioSystem.playError();
+            ui.showNotification(
+                `Ask the host to buy ${def.name} — placement is host-only`,
+                'rgba(90,60,20,0.92)',
+                2600
+            );
+            return false;
+        }
+        netManager.sendClientRequest({
+            kind: 'buy-store-object',
+            id: objectId,
+        });
+        ui.showNotification(
+            `Requested: ${def.name} — waiting on host`,
+            'rgba(30,50,90,0.92)',
+            1800
+        );
+        return true;
+    }
+
     if (needsPlacement && placementSystem) {
         beginEquipmentPlacement(def);
         return true;
     }
 
     gameState.player.money -= cost;
-    owned.push(objectId);
+    if (stackable) {
+        gameState.bucketsPurchased = (gameState.bucketsPurchased || 0) + 1;
+    } else {
+        owned.push(objectId);
+    }
     audioSystem.playCashRegister();
     ui.showNotification(`Purchased: ${def.name} (-$${cost})`, 'rgba(30,90,50,0.92)', 2200);
     ui.refreshRecipeShopContent();
@@ -257,6 +425,7 @@ function tryBuyStoreObject(objectId) {
         kegSystem._tapsDirty = true;
         kegSystem._updateKegVisuals();
     }
+    broadcastEconomyIfHost();
     return true;
 }
 
@@ -340,6 +509,7 @@ function finalizeEquipmentPurchase(def, transform) {
         kegSystem._updateKegVisuals();
     }
     ui.refreshRecipeShopContent();
+    broadcastEconomyIfHost();
 }
 
 function tryBuyRecipe(recipeId) {
@@ -353,11 +523,21 @@ function tryBuyRecipe(recipeId) {
         ui.showNotification(`Need $${cost} for ${r.name}`, 'rgba(120,40,40,0.92)', 2000);
         return false;
     }
+    if (isJoiner()) {
+        netManager.sendClientRequest({ kind: 'buy-recipe', id: recipeId });
+        ui.showNotification(
+            `Requested: ${r.name} — waiting on host`,
+            'rgba(30,50,90,0.92)',
+            1800
+        );
+        return true;
+    }
     gameState.player.money -= cost;
     ids.push(r.id);
     audioSystem.playCashRegister();
     ui.showNotification(`Unlocked recipe: ${r.name} (-$${cost})`, 'rgba(30,90,50,0.92)', 2200);
     ui.refreshRecipeShopContent();
+    broadcastEconomyIfHost();
     return true;
 }
 
@@ -379,6 +559,25 @@ function tryPlayJukeboxTrack(trackIdx) {
         );
         return false;
     }
+    // Joiners: their local BGM still changes (that's a per-tab audio thing)
+    // but the coin comes from the shared wallet via the host.
+    if (isJoiner()) {
+        requestSharedSpend(JUKEBOX_COST, 'jukebox', (ok) => {
+            if (!ok) return;
+            if (!audioSystem.playJukeboxTrack(trackIdx)) {
+                audioSystem.playError();
+                return;
+            }
+            audioSystem.playCashRegister();
+            ui.showNotification(
+                `Jukebox: Track ${trackIdx + 1} (-$${JUKEBOX_COST})`,
+                'rgba(70,35,110,0.94)',
+                2000
+            );
+            ui.refreshJukeboxContent();
+        });
+        return true;
+    }
     const ok = audioSystem.playJukeboxTrack(trackIdx);
     if (!ok) {
         audioSystem.playError();
@@ -392,6 +591,7 @@ function tryPlayJukeboxTrack(trackIdx) {
         2000
     );
     ui.refreshJukeboxContent();
+    broadcastEconomyIfHost();
     return true;
 }
 
@@ -428,6 +628,7 @@ function showCharacterSelectPanel() {
 function exitToTitleMenu() {
     gameState.started = false;
     gameState.paused = false;
+    ui.setPauseRestrictedMode(false);
     try {
         document.exitPointerLock?.();
     } catch (_) {
@@ -561,6 +762,12 @@ async function beginPlaySession(fromSave) {
     player.resetWorldPosition(0, 0);
     world?.syncOwnedStorePickups?.(gameState, gameAssetBucket);
     updateMultiplayerBanner();
+    // Joiners can't restart days, save, or tweak settings without blowing up
+    // their teammates' session — hide those pause-menu buttons.
+    ui.setPauseRestrictedMode(isJoiner());
+    // Push initial economy state to any already-connected teammates (hosting
+    // from a save) so they aren't briefly looking at $0 / empty kegs.
+    if (isHost()) broadcastEconomyIfHost();
 }
 
 async function establishNetSession() {
@@ -1024,6 +1231,90 @@ function removeRemotePlayer(peerId) {
     updateMultiplayerBanner();
 }
 
+// ---------------------------------------------------------------------------
+// Shared economy — pending spend acks keyed by a monotonically increasing id
+// ---------------------------------------------------------------------------
+
+let _nextSpendId = 1;
+const _pendingSpends = new Map(); // id → callback(approved: boolean)
+
+/**
+ * Joiner-side: ask the host to deduct `amount` from the shared wallet under
+ * a short label (just for logging). `cb(true)` fires if the host approves,
+ * `cb(false)` if it rejects (e.g. not enough money, or the funds were spent
+ * on something else first).
+ */
+function requestSharedSpend(amount, label, cb) {
+    const spendId = _nextSpendId++;
+    _pendingSpends.set(spendId, cb);
+    // Tiny safety: drop the callback after 5s so the map can't grow forever
+    // if the host vanishes.
+    setTimeout(() => {
+        if (_pendingSpends.delete(spendId)) {
+            try { cb?.(false); } catch (_) { /* ignore */ }
+        }
+    }, 5000);
+    netManager.sendClientRequest({
+        kind: 'spend',
+        spendId,
+        amount,
+        label,
+    });
+}
+
+netManager.onHostEvent((payload) => {
+    if (!payload || typeof payload !== 'object') return;
+    if (payload.kind === 'economy-state') {
+        applySharedEconomy(payload.state);
+    } else if (payload.kind === 'spend-result') {
+        const cb = _pendingSpends.get(payload.spendId);
+        if (cb) {
+            _pendingSpends.delete(payload.spendId);
+            try { cb(!!payload.approved); } catch (_) { /* ignore */ }
+        }
+        if (!payload.approved && payload.reason) {
+            audioSystem?.playError?.();
+            ui.showNotification(payload.reason, 'rgba(120,40,40,0.92)', 2200);
+        }
+    }
+});
+
+netManager.onClientRequest((peerId, payload) => {
+    if (!isHost() || !payload || typeof payload !== 'object') return;
+    if (payload.kind === 'spend') {
+        const amount = Math.max(0, Math.floor(Number(payload.amount) || 0));
+        const approved = gameState.player.money >= amount;
+        if (approved) gameState.player.money -= amount;
+        netManager.sendHostEvent(
+            {
+                kind: 'spend-result',
+                spendId: payload.spendId,
+                approved,
+                reason: approved
+                    ? null
+                    : `Host wallet short $${amount - gameState.player.money}`,
+            },
+            { to: peerId }
+        );
+        if (approved) broadcastEconomyIfHost();
+        return;
+    }
+    if (payload.kind === 'buy-recipe') {
+        tryBuyRecipe(payload.id);
+        return;
+    }
+    if (payload.kind === 'buy-store-object') {
+        tryBuyStoreObject(payload.id);
+        return;
+    }
+});
+
+netManager.onPeerJoined(() => {
+    // New teammate just joined — push them the current economy immediately so
+    // they don't briefly see $0 and a stale keg list before the next heartbeat.
+    broadcastEconomyIfHost();
+});
+
 netManager.onRemote((ev) => {
     if (ev.kind === 'state') {
         if (!gameReady) return;
@@ -1231,6 +1522,16 @@ function animate() {
         }
         if ((gameLogicTick % 30) === 0) updateMultiplayerBanner();
 
+        // Host-only: heartbeat the shared economy so any newly rejoined client
+        // is pulled back into sync within ~1.5s even if a change-triggered
+        // broadcast was missed.
+        if (isHost()) {
+            const now = performance.now();
+            if (now - _lastEconomyBroadcastMs > 1500) {
+                broadcastEconomyIfHost();
+            }
+        }
+
         // Convince eligibility scans patrons + taps; cache once per frame and
         // reuse for both interactable sync and UI prompt (was running 7×).
         _frameCanConvince =
@@ -1305,10 +1606,15 @@ document.addEventListener('keydown', (e) => {
             }
             const idx = e.key === '0' ? 9 : parseInt(e.key, 10) - 1;
             if (gameState.supplyTerminalView === 'tools') {
+                // Hotkeys index into the full catalog so the number labels in
+                // the supply terminal UI stay stable when items get bought.
+                // Owned non-stackable items intentionally show no key and
+                // ignore the keypress.
+                const def = STORE_OBJECT_DEFS[idx];
+                if (!def) return;
                 const owned = new Set(gameState.ownedObjectIds || []);
-                const forSale = STORE_OBJECT_DEFS.filter((o) => !owned.has(o.id));
-                if (idx >= 0 && idx < forSale.length && idx < 10) {
-                    tryBuyStoreObject(forSale[idx].id);
+                if (def.stackable === true || !owned.has(def.id)) {
+                    tryBuyStoreObject(def.id);
                 }
             } else if (gameState.supplyTerminalView === 'recipes') {
                 const locked = recipeSystem.recipes.filter(

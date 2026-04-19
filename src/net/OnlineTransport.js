@@ -233,10 +233,24 @@ export class OnlineTransport {
     // Runtime messaging
     // ---------------------------------------------------------------------
 
-    setCallbacks({ onRemoteState, onRemoteLeave, onKicked }) {
+    setCallbacks({ onRemoteState, onRemoteLeave, onKicked, onHostEvent, onClientRequest, onPeerJoined }) {
         this._onRemoteState = onRemoteState || null;
         this._onRemoteLeave = onRemoteLeave || null;
         this._onKicked = onKicked || null;
+        this._onHostEvent = onHostEvent || null;
+        this._onClientRequest = onClientRequest || null;
+        this._onPeerJoined = onPeerJoined || null;
+    }
+
+    /** Mirror of LocalTransport.sendHostEvent — see that file for details. */
+    sendHostEvent(payload, { to } = {}) {
+        if (!this._isHost || !this._serverId) return;
+        this._sendServer({ type: 'host-event', to, payload });
+    }
+
+    sendClientRequest(payload) {
+        if (this._isHost || !this._serverId) return;
+        this._sendServer({ type: 'client-request', payload });
     }
 
     sendPlayerState(state) {
@@ -420,6 +434,10 @@ export class OnlineTransport {
                 this._sendServer({ type: 'peer-state', peerId: msg.from, state: msg.state });
                 return;
             }
+            if (msg.type === 'client-request') {
+                this._onClientRequest?.(msg.from, msg.payload);
+                return;
+            }
             if (msg.type === 'player-leave') {
                 if (this._clients.delete(msg.from)) {
                     this._onRemoteLeave?.(msg.from);
@@ -456,6 +474,10 @@ export class OnlineTransport {
                 this._onRemoteLeave?.(msg.peerId);
                 return;
             }
+            if (msg.type === 'host-event') {
+                this._onHostEvent?.(msg.payload);
+                return;
+            }
             if (msg.type === 'roster') {
                 for (const p of msg.peers) {
                     if (p.peerId === this._peerId) continue;
@@ -490,6 +512,7 @@ export class OnlineTransport {
             hostSelf: this._selfInfo,
         });
         this._sendAnnounce();
+        this._onPeerJoined?.(msg.from);
     }
 
     _updateClient(peerId, state) {

@@ -238,10 +238,30 @@ export class LocalTransport {
     // Runtime messaging
     // ---------------------------------------------------------------------
 
-    setCallbacks({ onRemoteState, onRemoteLeave, onKicked }) {
+    setCallbacks({ onRemoteState, onRemoteLeave, onKicked, onHostEvent, onClientRequest, onPeerJoined }) {
         this._onRemoteState = onRemoteState || null;
         this._onRemoteLeave = onRemoteLeave || null;
         this._onKicked = onKicked || null;
+        this._onHostEvent = onHostEvent || null;
+        this._onClientRequest = onClientRequest || null;
+        this._onPeerJoined = onPeerJoined || null;
+    }
+
+    /**
+     * Host → broadcast a gameplay event (shared economy state, purchase
+     * approvals, etc.) to every connected client. If `to` is set it's targeted
+     * at a single peer (used for initial state on join / rejections).
+     * No-op on clients.
+     */
+    sendHostEvent(payload, { to } = {}) {
+        if (!this._isHost || !this._server) return;
+        this._sendServer({ type: 'host-event', to, payload });
+    }
+
+    /** Client → host request (purchase, spend, etc.). No-op on the host. */
+    sendClientRequest(payload) {
+        if (this._isHost || !this._server) return;
+        this._sendServer({ type: 'client-request', payload });
     }
 
     /**
@@ -366,6 +386,10 @@ export class LocalTransport {
                 this._sendServer({ type: 'peer-state', peerId: msg.from, state: msg.state });
                 return;
             }
+            if (msg.type === 'client-request') {
+                this._onClientRequest?.(msg.from, msg.payload);
+                return;
+            }
             if (msg.type === 'player-leave') {
                 if (this._clients.delete(msg.from)) {
                     this._onRemoteLeave?.(msg.from);
@@ -387,6 +411,10 @@ export class LocalTransport {
             }
             if (msg.type === 'peer-leave') {
                 this._onRemoteLeave?.(msg.peerId);
+                return;
+            }
+            if (msg.type === 'host-event') {
+                this._onHostEvent?.(msg.payload);
                 return;
             }
             if (msg.type === 'roster') {
@@ -424,6 +452,7 @@ export class LocalTransport {
             hostSelf: this._selfInfo,
         });
         this._sendAnnounce();
+        this._onPeerJoined?.(msg.from);
     }
 
     _updateClient(peerId, state) {
