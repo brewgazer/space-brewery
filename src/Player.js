@@ -231,6 +231,11 @@ export class Player {
                 colorIndex === BLUE_SUIT_COLOR_INDEX
                     ? brew?.diffuseVariants?.blueSuit || null
                     : null;
+            if (colorIndex === BLUE_SUIT_COLOR_INDEX) {
+                console.info('[Player] blue outfit picked — blueSuitTex?', !!blueSuitTex,
+                    'variants:', brew?.diffuseVariants ? Object.keys(brew.diffuseVariants) : 'none');
+            }
+            let bluesuitAppliedCount = 0;
             root.traverse((ch) => {
                 if (ch.isMesh && ch.material) {
                     ch.castShadow = false;
@@ -238,19 +243,29 @@ export class Player {
                     const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
                     ch.material = mats.map((m) => {
                         const mat = fixAvatarMaterial(m, 0.9);
-                        if (blueSuitTex && mat.map) {
-                            mat.map.dispose?.();
+                        if (blueSuitTex) {
+                            // Apply regardless of whether the cloned material
+                            // already had a `.map` — some brewer sub-meshes
+                            // ship with only a colour (no texture) and should
+                            // still adopt the blue atlas so they read as part
+                            // of the same outfit. Dispose the cloned default
+                            // map if present so we don't leak GPU memory.
+                            if (mat.map && mat.map !== blueSuitTex) {
+                                mat.map.dispose?.();
+                            }
                             mat.map = blueSuitTex;
-                            // Neutralise any lingering colour bias on the
-                            // material so the atlas shows through cleanly.
                             mat.color?.setHex?.(0xffffff);
                             mat.needsUpdate = true;
+                            bluesuitAppliedCount++;
                         }
                         return mat;
                     });
                     ch.material = ch.material.length === 1 ? ch.material[0] : ch.material;
                 }
             });
+            if (blueSuitTex) {
+                console.info(`[Player] blue suit applied to ${bluesuitAppliedCount} material(s)`);
+            }
         } else {
             const tint = new THREE.Color(
                 PATRON_TINT_COLORS[colorIndex % PATRON_TINT_COLORS.length]

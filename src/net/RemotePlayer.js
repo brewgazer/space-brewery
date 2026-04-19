@@ -39,10 +39,12 @@ function tintMaterials(root, tint, tintStrength = 1, bluesuitMap = null) {
         const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
         const cloned = mats.map((m) => {
             const mat = m.clone();
-            if (bluesuitMap && mat.map) {
+            if (bluesuitMap) {
                 // Share the already-loaded bluesuit atlas across every remote
                 // avatar using this slot — each RemotePlayer instance clones
                 // the material but the underlying GPU texture is the same.
+                // Apply even if the source material lacked a `.map`, same
+                // reasoning as the local player path.
                 mat.map = bluesuitMap;
                 mat.color?.setHex?.(0xffffff);
             } else if (mat.map) {
