@@ -547,7 +547,7 @@ export class World {
         // sized generously so the doorway + staircase model fits cleanly in
         // it; the backdrop panel behind the portal (added below) handles
         // occlusion of anything that might otherwise leak through the gap.
-        const PORTAL_HALF_WIDTH = 1.0; // ~2 m slot; wide enough for the staircase model
+        const PORTAL_HALF_WIDTH = 0.7; // ~1.4 m slot — tight around the portal's doorway
         const fineT0 = Math.PI * (0.5 - ENTRANCE_GAP_HALF); // start of the big gap
         const fineT1 = Math.PI * (0.5 + ENTRANCE_GAP_HALF); // end of the big gap
         const FINE_SEGMENTS = 28;
@@ -577,9 +577,12 @@ export class World {
         // the bar; the player's collider is what this actually stops. Placed
         // 40 cm south of the portal apex with a 2.5 m width so it covers the
         // whole slot from any viewing angle inside the taproom.
-        const backdropW = 2.5;
-        const backdropD = 0.3;
-        const backdropCz = DIVIDER_Z + TAP_RZ + 0.4;
+        // Backdrop generously overshoots the slot in every dimension: 5 m wide
+        // so any grazing sightline hits obsidian, 0.4 m thick, and pushed flush
+        // against the apex so the portal model overlaps its inside face.
+        const backdropW = 5.0;
+        const backdropD = 0.4;
+        const backdropCz = DIVIDER_Z + TAP_RZ + 0.25;
         const entranceBackdrop = new THREE.Mesh(
             new THREE.BoxGeometry(backdropW, wallH, backdropD),
             taproomWallMat
@@ -646,6 +649,11 @@ export class World {
         this.scene.add(tf);
         this._staticEnvMeshes.push(tf);
 
+        // Space-themed ceiling for the taproom only — brewery side keeps the
+        // default flat ceiling. Sits 2 cm below ROOM_CEILING_Y so it sits in
+        // front of the default rectangular ceiling without z-fighting.
+        this._buildTaproomCeiling(TAP_RX - 0.05, TAP_RZ - 0.05, DIVIDER_Z);
+
         // Portal door sits in the south entrance gap — customers spawn just
         // behind it (south, outside the taproom) and walk through it toward
         // their bar spot, so it reads as the way they "come through" into the
@@ -677,7 +685,11 @@ export class World {
         // Rotation lives on the group so we can inspect the model's bbox in
         // post-rotation world coords and anchor its south face precisely at
         // the apex, regardless of the GLB's source pivot.
-        group.rotation.y = Math.PI; // flip so the model's +Z face points into −Z world (into the taproom)
+        // Portal is rotated 90° CW relative to the previous 180° placement,
+        // so the model's doorway silhouette sits flush against the apex from
+        // the side the player sees it. Negative Y rotation = clockwise when
+        // looking down on the scene (three.js +Y rotations are CCW).
+        group.rotation.y = Math.PI / 2;
         group.position.set(x, 0, z);
         if (tpl) {
             const portal = tpl.clone(true);
@@ -688,32 +700,26 @@ export class World {
             const s = targetH / Math.max(0.001, h);
             portal.scale.setScalar(s);
             group.add(portal);
-            // Snap scale/rotation into a matrix we can query.
             group.updateMatrixWorld(true);
-            // Bbox of the model as it now sits inside the rotated group, in
-            // group-local coords. We want:
+            // Bbox of the model as it now sits under the rotated group, in
+            // world coords. We want, in the group's rotated frame:
             //   • feet at y=0
             //   • centered on X
-            //   • southern face (max local Z) at local Z=0 so the doorway
-            //     lands exactly on the apex and everything else (steps etc.)
-            //     extends to lower Z, i.e. into the taproom.
+            //   • max-Z face at 0 so the "south" silhouette lands on the apex
+            //     and the rest of the model extends into the taproom.
             const bbL = new THREE.Box3().setFromObject(portal);
-            // bbL is in world coords (post-rotation of group). Convert by
-            // subtracting the group's world position to get group-local coords.
             const worldPos = new THREE.Vector3();
             group.getWorldPosition(worldPos);
-            const localMinX = bbL.min.x - worldPos.x;
-            const localMaxX = bbL.max.x - worldPos.x;
-            const localMinY = bbL.min.y - worldPos.y;
-            const localMaxZ = bbL.max.z - worldPos.z;
-            // Invert the 180° Y rotation when converting desired local offsets
-            // back into the un-rotated portal's own coordinate frame: for a
-            // Math.PI Y rotation, a desired shift (Δx, Δy, Δz) in group-local
-            // space becomes (−Δx, Δy, −Δz) in the portal's own frame.
-            const desiredDx = -(localMinX + localMaxX) * 0.5;
-            const desiredDy = -localMinY;
-            const desiredDz = -localMaxZ; // push so max local Z lands at 0 (the apex)
-            portal.position.set(-desiredDx, desiredDy, -desiredDz);
+            const desiredDx = -((bbL.min.x - worldPos.x) + (bbL.max.x - worldPos.x)) * 0.5;
+            const desiredDy = -(bbL.min.y - worldPos.y);
+            const desiredDz = -(bbL.max.z - worldPos.z);
+            // Invert the group's Y rotation to convert desired group-local
+            // offset into the portal's own (un-rotated) coordinate frame.
+            const offset = new THREE.Vector3(desiredDx, desiredDy, desiredDz).applyAxisAngle(
+                new THREE.Vector3(0, 1, 0),
+                -group.rotation.y
+            );
+            portal.position.copy(offset);
             portal.traverse((o) => {
                 if (o.isMesh) {
                     o.castShadow = false;
@@ -792,6 +798,64 @@ export class World {
 
         const mesh = new THREE.Mesh(geo, material);
         mesh.position.y = 0.005;
+        return mesh;
+    }
+
+    /**
+     * Space-themed ceiling that only covers the taproom (half-ellipse on +Z
+     * side of the divider). Same fan-triangulation as the floor, but with the
+     * triangle winding flipped so the texture faces DOWN into the room. Uses
+     * textures extracted from need_some_space.glb when available; otherwise
+     * falls back to a deep purple matte ceiling that matches the room's tone.
+     */
+    _buildTaproomCeiling(rx, rz, cz) {
+        const SEG = 48;
+        const positions = [];
+        const uvs = [];
+        const indices = [];
+        positions.push(0, 0, cz);
+        uvs.push(0.5, 0.0);
+        for (let i = 0; i <= SEG; i++) {
+            const t = Math.PI * (i / SEG);
+            const x = rx * Math.cos(t);
+            const z = cz + rz * Math.sin(t);
+            positions.push(x, 0, z);
+            uvs.push((x + rx) / (rx * 2), (z - cz) / rz);
+        }
+        // Flip winding so the plane's normal points DOWN (−Y) — the ceiling
+        // needs to face into the room, not up toward the sky.
+        for (let i = 1; i <= SEG; i++) {
+            indices.push(0, i + 1, i);
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        geo.setIndex(indices);
+        geo.computeVertexNormals();
+
+        const sc = this.assets?.textures?.spaceCeiling || {};
+        const hasTex = !!(sc.map || sc.emissiveMap);
+        const mat = hasTex
+            ? new THREE.MeshStandardMaterial({
+                map: sc.map || null,
+                normalMap: sc.normalMap || null,
+                roughnessMap: sc.roughnessMap || null,
+                emissiveMap: sc.emissiveMap || sc.map || null,
+                emissive: new THREE.Color(0xffffff),
+                emissiveIntensity: sc.emissiveMap ? 1.0 : 0.55,
+                roughness: 0.85,
+                metalness: 0.0,
+                envMapIntensity: 0.0,
+                side: THREE.FrontSide,
+            })
+            : new THREE.MeshBasicMaterial({ color: 0x1a1430 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.y = ROOM_CEILING_Y - 0.02;
+        mesh.receiveShadow = false;
+        mesh.castShadow = false;
+        mesh.name = 'TaproomCeiling';
+        this.scene.add(mesh);
+        this._staticEnvMeshes.push(mesh);
         return mesh;
     }
 
