@@ -19,7 +19,7 @@ let html = fs.readFileSync(indexPath, 'utf8');
 
 if (url) {
     const safe = url.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const replacement = `window.__BREW_RELAY_CI__ = '${safe}'`;
+    const replacement = `window.__BREW_RELAY_CI__ = '${safe}';`;
     const replaced = html.replace(
         /window\.__BREW_RELAY_CI__\s*=\s*window\.__BREW_RELAY_CI__\s*\|\|\s*'';/,
         replacement
