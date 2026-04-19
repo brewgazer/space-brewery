@@ -559,6 +559,34 @@ export class World {
         this._staticEnvMeshes.push(eFrameR);
         this._addCollider(eFrameR);
 
+        // Obsidian filler panels flanking the portal — the curved-arc entrance
+        // gap is ~6.5 m wide but the portal door is only ~2 m, so without
+        // these you could see space on both sides of the portal. These panels
+        // run along the wall line (z ≈ apex) from the portal edge outward to
+        // where the arc resumes, closing the outer openings while leaving a
+        // ~2 m center strip open for the portal itself.
+        const portalHalfOpening = 1.0; // half-width of the center slot kept open
+        const arcEndX = 3.2;           // ~where the arc resumes on each side
+        const fillerW = Math.max(0.05, arcEndX - portalHalfOpening); // ≈ 2.2 m
+        const fillerCx = (portalHalfOpening + arcEndX) * 0.5;        // ≈ 2.1 m
+        const fillerCz = DIVIDER_Z + TAP_RZ - 0.02;                  // 2 cm in from apex
+        const fillerL = new THREE.Mesh(
+            new THREE.BoxGeometry(fillerW, wallH, 0.3),
+            taproomWallMat
+        );
+        fillerL.position.set(-fillerCx, wallH / 2, fillerCz);
+        this.scene.add(fillerL);
+        this._staticEnvMeshes.push(fillerL);
+        this._addCollider(fillerL);
+        const fillerR = new THREE.Mesh(
+            new THREE.BoxGeometry(fillerW, wallH, 0.3),
+            taproomWallMat
+        );
+        fillerR.position.set(fillerCx, wallH / 2, fillerCz);
+        this.scene.add(fillerR);
+        this._staticEnvMeshes.push(fillerR);
+        this._addCollider(fillerR);
+
         const brewTex = this.assets.textures?.breweryFloor;
         const bfMat = brewTex
             ? new THREE.MeshStandardMaterial({
