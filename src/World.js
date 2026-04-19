@@ -459,8 +459,34 @@ export class World {
         // Dividing wall — splits brewery from taproom (pass-through in middle for the bartender).
         const DIV_GAP = 5.6; // clear opening, aligns with horseshoe inner opening
         const divHalfW = (RW - DIV_GAP) * 0.5;
-        makeWall(-(DIV_GAP * 0.5 + divHalfW * 0.5), DIVIDER_Z, divHalfW, 0.3);
-        makeWall(+(DIV_GAP * 0.5 + divHalfW * 0.5), DIVIDER_Z, divHalfW, 0.3);
+        const divLeftX = -(DIV_GAP * 0.5 + divHalfW * 0.5);
+        const divRightX = +(DIV_GAP * 0.5 + divHalfW * 0.5);
+        makeWall(divLeftX, DIVIDER_Z, divHalfW, 0.3);
+        makeWall(divRightX, DIVIDER_Z, divHalfW, 0.3);
+
+        // Obsidian overlay on the *taproom-facing* (+Z) side of the divider so
+        // the bar's back wall reads as volcanic glass to match the curved
+        // outer wall, while the brewery side keeps the default hull-panel
+        // material. Uses a thin plane floated 1 cm in front of the box to
+        // avoid z-fighting, and is non-colliding / static scenery.
+        const divWallMat = this._taproomWallMaterial();
+        const divOverlayW = divHalfW - 0.02; // just inside the box footprint
+        const divOverlayZ = DIVIDER_Z + 0.151; // 0.3/2 + 0.001 epsilon
+        const makeDividerOverlay = (cx) => {
+            const ov = new THREE.Mesh(
+                new THREE.PlaneGeometry(divOverlayW, wallH),
+                divWallMat
+            );
+            ov.position.set(cx, wallH / 2, divOverlayZ);
+            // PlaneGeometry's default normal is +Z, which already points into
+            // the taproom from the divider, so no rotation needed.
+            ov.receiveShadow = true;
+            ov.userData._staticScenery = true;
+            this.scene.add(ov);
+            this._staticEnvMeshes.push(ov);
+        };
+        makeDividerOverlay(divLeftX);
+        makeDividerOverlay(divRightX);
 
         // Door-frame accents on the pass-through.
         const frameMat = new THREE.MeshStandardMaterial({
