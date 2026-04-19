@@ -7,6 +7,7 @@
  * Env: PORT (default 8787)
  */
 
+import http from 'http';
 import { WebSocketServer } from 'ws';
 
 const PORT = Number(process.env.PORT) || 8787;
@@ -99,7 +100,26 @@ function cleanupHost(ws) {
     }
 }
 
-const wss = new WebSocketServer({ port: PORT });
+// HTTP: so opening the Railway HTTPS URL in a browser shows help text instead of "Upgrade Required".
+// WebSockets: same port, upgraded via handleUpgrade (what the game uses as wss://).
+const server = http.createServer((req, res) => {
+    const host = req.headers.host || 'localhost';
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(
+        'Space Brewery — multiplayer relay (WebSockets only)\n\n' +
+            'This URL is not the game. Open your GitHub Pages link to play.\n' +
+            'In-game: Find game → Online (relay).\n\n' +
+            `Configure the game with: wss://${host}\n`
+    );
+});
+
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+    });
+});
 
 wss.on('connection', (ws) => {
     ws.peerId = null;
@@ -188,5 +208,7 @@ wss.on('connection', (ws) => {
     });
 });
 
-// eslint-disable-next-line no-console
-console.log(`Brew relay listening on ws://0.0.0.0:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+    // eslint-disable-next-line no-console
+    console.log(`Brew relay listening on 0.0.0.0:${PORT} (HTTP help + WebSocket)`);
+});

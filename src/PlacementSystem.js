@@ -134,55 +134,114 @@ export class PlacementSystem {
         if (!this._active || !this._ghost) return;
         this._elapsed += delta;
 
-        const origin = this.camera.getWorldPosition(this._tmpVec);
-        const dir = this.camera.getWorldDirection(this._tmpDir);
+        const camPos = this.camera.getWorldPosition(this._tmpVec);
+        const camDir = this.camera.getWorldDirection(this._tmpDir);
+
+        // Anchor the reach circle on the *player's feet*, not the camera (third-person
+        // puts the lens several metres behind the player and makes placement feel warped).
+        const playerX = this.player?.avatarPos?.x ?? camPos.x;
+        const playerZ = this.player?.avatarPos?.z ?? camPos.z;
+
+        // Player-forward (XZ, from yaw). Used as a fallback when the camera ray points
+        // straight down (the hit would be under the player) so the ghost spawns in front.
+        const yaw = this.player?.euler?.y ?? 0;
+        const fwdX = Math.sin(yaw);
+        const fwdZ = Math.cos(yaw);
 
         // Intersect camera ray with the ground plane (y = footprint.y).
         const groundY = this._footprint.y;
-        let hx = origin.x;
-        let hz = origin.z;
-        if (Math.abs(dir.y) > 1e-4) {
-            const tHit = (groundY - origin.y) / dir.y;
+        let hx = playerX + fwdX * 2.5;
+        let hz = playerZ + fwdZ * 2.5;
+        if (Math.abs(camDir.y) > 1e-4) {
+            const tHit = (groundY - camPos.y) / camDir.y;
             if (tHit > 0) {
-                hx = origin.x + dir.x * tHit;
-                hz = origin.z + dir.z * tHit;
+                hx = camPos.x + camDir.x * tHit;
+                hz = camPos.z + camDir.z * tHit;
             } else {
-                // Looking up/away from the floor — project forward along the XZ plane instead.
-                const horizLen = Math.hypot(dir.x, dir.z) || 1;
-                hx = origin.x + (dir.x / horizLen) * 3;
-                hz = origin.z + (dir.z / horizLen) * 3;
+                const horizLen = Math.hypot(camDir.x, camDir.z);
+                if (horizLen > 1e-3) {
+                    hx = playerX + (camDir.x / horizLen) * 3;
+                    hz = playerZ + (camDir.z / horizLen) * 3;
+                }
             }
         }
 
-        // Clamp to a reasonable reach around the player's feet (so the ghost can't
-        // fly off to the far side of the room just by aiming up).
-        const MAX_REACH = 5.5;
-        const MIN_REACH = 1.4;
-        const playerX = origin.x;
-        const playerZ = origin.z;
-        let dx = hx - playerX;
-        let dz = hz - playerZ;
-        const dist = Math.hypot(dx, dz);
-        if (dist < 1e-4) {
-            const horizLen = Math.hypot(dir.x, dir.z) || 1;
-            dx = (dir.x / horizLen) * MIN_REACH;
-            dz = (dir.z / horizLen) * MIN_REACH;
-        } else if (dist < MIN_REACH) {
-            dx *= MIN_REACH / dist;
-            dz *= MIN_REACH / dist;
-        } else if (dist > MAX_REACH) {
-            dx *= MAX_REACH / dist;
-            dz *= MAX_REACH / dist;
-        }
-        let finalX = playerX + dx;
-        let finalZ = playerZ + dz;
-
-        const b = this._bounds;
+        // The ghost always sits in a half-plane strictly in front of the player.
+        // MIN_FORWARD ensures the back edge of the halo circle is past the player's
+        // body by a small margin (so the halo never touches the avatar).
         const fp = this._footprint;
         const halfW = fp.w * 0.5;
         const halfD = fp.d * 0.5;
+        const halfMax = Math.max(halfW, halfD);
+        const PLAYER_R = 0.55;
+        // haloRadius matches the CircleGeometry used by _buildGhost().
+        const haloRadius = halfMax * 1.5;
+        const MIN_FORWARD = haloRadius + PLAYER_R + 0.15;
+        const MAX_REACH = Math.max(MIN_FORWARD + 2.5, 5.5);
+        const MAX_SIDE = 3.5;
+
+        let dx = hx - playerX;
+        let dz = hz - playerZ;
+
+        // Decompose the aim vector into player-local (forward, right) components so
+        // we can independently clamp "how far in front" vs "how far to the side".
+        let fwdComp = dx * fwdX + dz * fwdZ;
+        let rightComp = dx * fwdZ - dz * fwdX;
+
+        // Keep the ghost in the half-plane in front of the player at all times.
+        if (fwdComp < MIN_FORWARD) fwdComp = MIN_FORWARD;
+
+        // Limit side-to-side sweep so the ghost tracks naturally with the camera.
+        if (rightComp > MAX_SIDE) rightComp = MAX_SIDE;
+        else if (rightComp < -MAX_SIDE) rightComp = -MAX_SIDE;
+
+        // Global reach cap so extreme forward aim doesn't launch the ghost across
+        // the brewery.
+        const totalDist = Math.hypot(fwdComp, rightComp);
+        if (totalDist > MAX_REACH) {
+            const k = MAX_REACH / totalDist;
+            fwdComp *= k;
+            rightComp *= k;
+            if (fwdComp < MIN_FORWARD) fwdComp = MIN_FORWARD;
+        }
+
+        // Rebuild the world-space offset from the clamped local components.
+        dx = fwdComp * fwdX + rightComp * fwdZ;
+        dz = fwdComp * fwdZ - rightComp * fwdX;
+
+        let finalX = playerX + dx;
+        let finalZ = playerZ + dz;
+
+        // Bounds clamp. If this shortens forward progress below MIN_FORWARD, the
+        // ghost is still allowed to render (it'll be red on collision), but we at
+        // least try to slide it sideways to stay in front of the player.
+        const b = this._bounds;
         finalX = Math.min(Math.max(finalX, b.minX + halfW), b.maxX - halfW);
         finalZ = Math.min(Math.max(finalZ, b.minZ + halfD), b.maxZ - halfD);
+
+        // Post-bounds safety: if the clamp dragged us back into the player's
+        // forward cylinder, search for an in-front side-step that still fits.
+        const playerToFinalFwd =
+            (finalX - playerX) * fwdX + (finalZ - playerZ) * fwdZ;
+        if (playerToFinalFwd < MIN_FORWARD - 0.01) {
+            const sideSteps = [0, 0.6, -0.6, 1.2, -1.2, 2.0, -2.0, 3.0, -3.0];
+            for (const side of sideSteps) {
+                const cx =
+                    playerX + MIN_FORWARD * fwdX + side * fwdZ;
+                const cz =
+                    playerZ + MIN_FORWARD * fwdZ - side * fwdX;
+                if (
+                    cx >= b.minX + halfW &&
+                    cx <= b.maxX - halfW &&
+                    cz >= b.minZ + halfD &&
+                    cz <= b.maxZ - halfD
+                ) {
+                    finalX = cx;
+                    finalZ = cz;
+                    break;
+                }
+            }
+        }
 
         this._ghost.position.set(finalX, groundY, finalZ);
         this._valid = this._isValidPosition(finalX, finalZ);

@@ -19,13 +19,13 @@ let html = fs.readFileSync(indexPath, 'utf8');
 
 if (url) {
     const safe = url.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const replacement = `window.BREW_RELAY_URL = window.BREW_RELAY_URL || '${safe}'`;
+    const replacement = `window.__BREW_RELAY_CI__ = '${safe}'`;
     const replaced = html.replace(
-        /window\.BREW_RELAY_URL = window\.BREW_RELAY_URL \|\| '[^']*';/,
+        /window\.__BREW_RELAY_CI__\s*=\s*window\.__BREW_RELAY_CI__\s*\|\|\s*'';/,
         replacement
     );
     if (replaced === html) {
-        console.error('set-relay-for-pages: could not find BREW_RELAY_URL line in', indexPath);
+        console.error('set-relay-for-pages: could not find __BREW_RELAY_CI__ line in', indexPath);
         process.exit(1);
     }
     html = replaced;

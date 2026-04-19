@@ -426,7 +426,18 @@
     </div>
 
     <script>
-        window.BREW_RELAY_URL = window.BREW_RELAY_URL || 'ws://127.0.0.1:8787';
+        window.__BREW_RELAY_CI__ = window.__BREW_RELAY_CI__ || '';
+        (function () {
+            var w = window;
+            if (w.__BREW_RELAY_CI__) {
+                w.BREW_RELAY_URL = w.__BREW_RELAY_CI__;
+                return;
+            }
+            var h = location.hostname;
+            var local = h === 'localhost' || h === '127.0.0.1';
+            if (w.BREW_RELAY_URL) return;
+            w.BREW_RELAY_URL = local ? 'ws://127.0.0.1:8787' : '';
+        })();
     </script>
     <script type="importmap">
     {

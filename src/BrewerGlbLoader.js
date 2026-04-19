@@ -178,9 +178,9 @@ export async function loadBrewerGlbAssets(withTimeout) {
         bubbleY,
         sourcePath: rigPath,
         walkYawOffset: BREWER_GLB_WALK_YAW_OFFSET,
-        viewChestY: box2.min.y + h * 0.52,
-        thirdPersonCamDistance: Math.max(0.95, Math.min(5.5, 4.8 * vsHuman)),
+        viewChestY: box2.min.y + h * 0.95,
+        thirdPersonCamDistance: Math.max(0.9, Math.min(4.2, 3.6 * vsHuman)),
         thirdPersonShoulderOffset: Math.max(0.08, Math.min(0.5, 0.4 * vsHuman)),
-        thirdPersonMinCamY: Math.max(0.1, Math.min(0.55, 0.5 * vsHuman)),
+        thirdPersonMinCamY: Math.max(0.6, Math.min(1.4, 1.35 * vsHuman)),
     };
 }

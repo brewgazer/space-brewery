@@ -19,18 +19,20 @@ function genId() {
 }
 
 export function getRelayUrl() {
-    if (typeof window !== 'undefined' && window.BREW_RELAY_URL) {
-        return String(window.BREW_RELAY_URL);
+    if (typeof window === 'undefined') {
+        return 'ws://127.0.0.1:8787';
     }
-    if (typeof window !== 'undefined') {
-        const { protocol, hostname } = window.location;
-        const isHttps = protocol === 'https:';
-        const scheme = isHttps ? 'wss' : 'ws';
-        if (hostname === 'localhost' || hostname === '127.0.0.1') {
-            return `${scheme}://${hostname}:8787`;
-        }
+    const raw = window.BREW_RELAY_URL;
+    if (raw != null && String(raw).trim() !== '') {
+        return String(raw).trim();
     }
-    return 'ws://127.0.0.1:8787';
+    const { protocol, hostname } = window.location;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        const scheme = protocol === 'https:' ? 'wss' : 'ws';
+        return `${scheme}://${hostname}:8787`;
+    }
+    // GitHub Pages / any hosted HTTPS: no default — ws://127 would be mixed-content blocked.
+    return '';
 }
 
 export class OnlineTransport {
@@ -301,7 +303,28 @@ export class OnlineTransport {
         await this._connectWs();
     }
 
+    _relayConfigError() {
+        if (!this._relayUrl) {
+            return new Error(
+                'Online relay URL is missing. On GitHub: Settings → Secrets → add BREW_RELAY_WSS_URL (your Railway wss://… URL), then redeploy Pages. See DEPLOY.md.'
+            );
+        }
+        if (
+            typeof window !== 'undefined' &&
+            window.location.protocol === 'https:' &&
+            this._relayUrl.startsWith('ws://')
+        ) {
+            return new Error(
+                'Relay must use wss:// when the game is on HTTPS (not ws://127.0.0.1). Set the BREW_RELAY_WSS_URL secret and redeploy.'
+            );
+        }
+        return null;
+    }
+
     _connectWs() {
+        const cfgErr = this._relayConfigError();
+        if (cfgErr) return Promise.reject(cfgErr);
+
         return new Promise((resolve, reject) => {
             let settled = false;
             const ws = new WebSocket(this._relayUrl);

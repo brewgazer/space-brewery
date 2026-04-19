@@ -29,14 +29,14 @@ export class Player {
         this._curAnimAction = null;
         this._walkYawOffset = 0;
 
-        this._camDistance = 5.1;
+        this._camDistance = 3.8;
         /** GTA-style over-the-shoulder: positive = camera shifts right (character reads left-of-center). */
         this._shoulderOffset = 0.42;
-        this._lookHeight = 1.22;
+        this._lookHeight = 1.75;
         /** Extra Y on the lens only (look-at stays at _lookHeight) so the view sits slightly higher. */
-        this._thirdPersonCameraYLift = 0.26;
+        this._thirdPersonCameraYLift = 0.25;
         /** Floor is y≈0; orbit pitch can push the lens under the plane without this clamp. */
-        this._minThirdPersonCamY = 0.52;
+        this._minThirdPersonCamY = 1.3;
         /** Orbit angles used for the camera rig (smoothed toward `euler` so look stays fluid). */
         this._camEuler = new THREE.Euler(0, 0, 0, 'YXZ');
         /** While holding forward (W), yaw eases toward walk direction so the camera stays behind you. */
@@ -55,6 +55,12 @@ export class Player {
 
         this.isLocked = false;
         this.sensitivity = 0.002;
+        /**
+         * Third-person vertical look: most orbit-cam games feel natural when moving the
+         * mouse up tilts the camera down behind the player (revealing more of the sky).
+         * Keep first-person on standard non-inverted so WASD-aim feels like every FPS.
+         */
+        this.invertThirdPersonPitch = true;
 
         this._direction = new THREE.Vector3();
         this._forward = new THREE.Vector3();
@@ -97,11 +103,11 @@ export class Player {
         }
         this._clips = null;
         this._curAnimAction = null;
-        this._camDistance = 5.1;
+        this._camDistance = 3.8;
         this._shoulderOffset = 0.42;
-        this._minThirdPersonCamY = 0.52;
-        this._lookHeight = 1.22;
-        this._thirdPersonCameraYLift = 0.26;
+        this._minThirdPersonCamY = 1.3;
+        this._lookHeight = 1.75;
+        this._thirdPersonCameraYLift = 0.25;
     }
 
     /**
@@ -123,16 +129,16 @@ export class Player {
         if (tpl.viewChestY != null) {
             this._lookHeight = tpl.viewChestY;
         } else {
-            this._lookHeight = 1.22;
+            this._lookHeight = 1.75;
         }
         if (tpl.thirdPersonCamDistance != null) {
             this._camDistance = tpl.thirdPersonCamDistance;
             this._shoulderOffset = tpl.thirdPersonShoulderOffset ?? 0.42;
-            this._minThirdPersonCamY = tpl.thirdPersonMinCamY ?? 0.52;
+            this._minThirdPersonCamY = tpl.thirdPersonMinCamY ?? 1.3;
         } else {
-            this._camDistance = 5.1;
+            this._camDistance = 3.8;
             this._shoulderOffset = 0.42;
-            this._minThirdPersonCamY = 0.52;
+            this._minThirdPersonCamY = 1.3;
         }
         this.avatarPos.set(this.camera.position.x, 0, this.camera.position.z);
 
@@ -457,7 +463,8 @@ export class Player {
 
             if (this._thirdPerson) {
                 this.euler.y -= e.movementX * this.sensitivity;
-                this.euler.x -= e.movementY * this.sensitivity;
+                const pitchSign = this.invertThirdPersonPitch ? 1 : -1;
+                this.euler.x += pitchSign * e.movementY * this.sensitivity;
                 this.euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.euler.x));
                 return;
             }
