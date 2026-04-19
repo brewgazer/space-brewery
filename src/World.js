@@ -543,8 +543,11 @@ export class World {
         // the portal's edge. Uses the same half-ellipse parameterization as
         // the main arc loop above, so every piece stays tangent to the wall
         // curve — no perpendicular jambs, no triangular seams. Only segments
-        // whose mid-x falls inside the portal slot are omitted.
-        const PORTAL_HALF_WIDTH = 0.85; // keep this much clear around x=0 for the door
+        // whose mid-x falls inside the portal slot are omitted. The slot is
+        // intentionally tighter than the portal's outer frame so the wall
+        // overlaps the frame slightly on both sides — that guarantees no
+        // sightline leaks past the portal's edge to the space outside.
+        const PORTAL_HALF_WIDTH = 0.55; // ~1.1 m slot; portal frame is wider, so wall hides it slightly
         const fineT0 = Math.PI * (0.5 - ENTRANCE_GAP_HALF); // start of the big gap
         const fineT1 = Math.PI * (0.5 + ENTRANCE_GAP_HALF); // end of the big gap
         const FINE_SEGMENTS = 28;
@@ -566,6 +569,26 @@ export class World {
             const yaw = Math.atan2(-dz, dx);
             makeWall(cx, cz, len + 0.04, 0.3, yaw, true, taproomWallMat);
         }
+
+        // Obsidian backdrop just behind the portal — guarantees no sightline
+        // can leak to the exterior through the portal slot, no matter what
+        // angle the player looks at it from. Customers ignore colliders in
+        // their steering, so they still phase through on their way to/from
+        // the bar; the player's collider is what this actually stops. Placed
+        // 40 cm south of the portal apex with a 2.5 m width so it covers the
+        // whole slot from any viewing angle inside the taproom.
+        const backdropW = 2.5;
+        const backdropD = 0.3;
+        const backdropCz = DIVIDER_Z + TAP_RZ + 0.4;
+        const entranceBackdrop = new THREE.Mesh(
+            new THREE.BoxGeometry(backdropW, wallH, backdropD),
+            taproomWallMat
+        );
+        entranceBackdrop.position.set(0, wallH / 2, backdropCz);
+        entranceBackdrop.receiveShadow = true;
+        this.scene.add(entranceBackdrop);
+        this._staticEnvMeshes.push(entranceBackdrop);
+        this._addCollider(entranceBackdrop);
 
         const brewTex = this.assets.textures?.breweryFloor;
         const bfMat = brewTex
