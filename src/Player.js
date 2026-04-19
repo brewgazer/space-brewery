@@ -54,7 +54,23 @@ export class Player {
         this.moveRight = false;
 
         this.isLocked = false;
+        /**
+         * Baseline mouse sensitivity (radians per device-pixel of movement).
+         * Runtime look-speed is `sensitivity * sensitivityMultiplier`; the
+         * settings slider only ever writes the multiplier so the baseline
+         * feel at 1.0× stays a known-good value.
+         */
         this.sensitivity = 0.002;
+        this.sensitivityMultiplier = 1.0;
+        try {
+            const raw = localStorage.getItem('brewery_mouse_sensitivity');
+            if (raw != null) {
+                const v = parseFloat(raw);
+                if (!Number.isNaN(v)) {
+                    this.sensitivityMultiplier = Math.max(1, Math.min(10, v));
+                }
+            }
+        } catch (_) { /* ignore */ }
         /**
          * Third-person vertical look: most orbit-cam games feel natural when moving the
          * mouse up tilts the camera down behind the player (revealing more of the sky).
@@ -94,14 +110,18 @@ export class Player {
         this._jumpGravity = 14.0;
 
         /**
-         * Punch combo state. LMB plays `punch1`; a second LMB inside
-         * `_punchComboWindow` plays `punch2` and, if the swing connects, flings
-         * the victim backward.
+         * Punch combo state. LMB plays `punch1` to completion; a second LMB
+         * during that window *queues* `punch2`, which then plays back-to-back
+         * once the first swing finishes (no interruption → no choppiness).
+         * Only the finisher (`punch2`) invokes `onPunchLanded`, which flings
+         * the victim backward if the hit connects.
+         *
+         *   0 = idle, not swinging
+         *   1 = punch1 currently playing
+         *   2 = punch2 currently playing
          */
-        this._punchStage = 0;            // 0 idle, 1 after punch1, 2 after punch2
-        this._lastPunchAt = -1e9;
-        this._punchComboWindow = 0.55;
-        this._punchCooldown = 0.22;      // min time between swings
+        this._punchStage = 0;
+        this._punchQueued = false;       // true if LMB pressed during punch1
         this._punchLockUntil = 0;        // while <= now, movement anims suppressed
         this.onPunchLanded = null;       // main.js installs hit-detection callback
 
@@ -267,6 +287,12 @@ export class Player {
     /** @param {THREE.AnimationClip|null|undefined} clip */
     _playBrewerOneShotClip(clip) {
         if (!this._thirdPerson || !this.mixer || !clip) return false;
+        // If a punch combo was running when an unrelated gesture kicks in
+        // (pour, grab, taunt, etc.), let the punch state machine quietly
+        // bail so the next click starts a fresh combo rather than queueing
+        // a ghost finisher.
+        this._punchStage = 0;
+        this._punchQueued = false;
         this._suppressLocoAnim = true;
         const next = this.mixer.clipAction(clip);
         next.reset();
@@ -339,42 +365,103 @@ export class Player {
     }
 
     /**
-     * Trigger a punch. The first swing always plays `punch1`. A second swing
-     * within `_punchComboWindow` plays `punch2`, which is the "finisher" — if
-     * it lands, `onPunchLanded` is invoked so the scene can send the victim
-     * flying. Consecutive clicks past that reset to punch1.
+     * Trigger a punch. A single LMB plays `punch1` to completion. If the
+     * player LMBs again while `punch1` is still swinging, `punch2` is queued
+     * and starts the moment `punch1` finishes — the two clips run
+     * back-to-back with no interrupt cut. `onPunchLanded` fires during
+     * `punch2` so the finisher can send the victim flying.
      */
     punch() {
         if (!this._thirdPerson || !this.patronRoot || !this.mixer) return false;
-        const now = performance.now() * 0.001;
-        if (now - this._lastPunchAt < this._punchCooldown) return false;
 
-        const comboReady =
-            this._punchStage === 1 && now - this._lastPunchAt <= this._punchComboWindow;
-        const kind = comboReady ? 'punch2' : 'punch1';
-        const clip = this._clips?.[kind];
-        if (!clip) return false;
+        if (this._punchStage === 0) {
+            const clip = this._clips?.punch1;
+            if (!clip) return false;
+            this._punchQueued = false;
+            this._startPunchClip('punch1', clip);
+            return true;
+        }
+        if (this._punchStage === 1) {
+            // Second click during the first swing → queue the finisher.
+            if (this._clips?.punch2) this._punchQueued = true;
+            return true;
+        }
+        // Already mid-finisher; extra clicks do nothing.
+        return false;
+    }
 
-        const ok = this._playBrewerOneShotClip(clip);
-        if (!ok) return false;
-        this._lastPunchAt = now;
-        this._punchLockUntil = now + Math.max(0.22, clip.duration * 0.9);
-        this._punchStage = comboReady ? 0 : 1;
+    /**
+     * Play one of the two punch clips as a one-shot. On finish, either chain
+     * into the queued `punch2` or fall back to idle / walk. Keeps
+     * `_suppressLocoAnim` on for the whole combo so the walk clip doesn't
+     * bleed through between swings.
+     */
+    _startPunchClip(kind, clip) {
+        const mixer = this.mixer;
+        if (!mixer || !clip) return;
 
-        // Combo finisher lands ~40% through the clip (fist contact frame-ish);
-        // defer so the animation reads as hitting first, then the victim flies.
-        if (comboReady && typeof this.onPunchLanded === 'function') {
+        this._punchStage = kind === 'punch1' ? 1 : 2;
+        this._suppressLocoAnim = true;
+        this._punchLockUntil = performance.now() * 0.001 + Math.max(0.22, clip.duration);
+
+        const next = mixer.clipAction(clip);
+        next.reset();
+        next.setLoop(THREE.LoopOnce, 1);
+        next.clampWhenFinished = true;
+        // Slightly snappier crossfade for the first swing; punch2 comes in
+        // tighter so the two reads as a single combo.
+        const fade = kind === 'punch2' ? 0.05 : 0.1;
+        next.fadeIn(fade).play();
+        if (this._curAnimAction && this._curAnimAction !== next) {
+            this._curAnimAction.fadeOut(fade);
+        }
+        this._curAnimAction = next;
+
+        // Finisher: fire the scene callback ~40% through the swing, so the
+        // animation reads as impacting before the victim flies.
+        if (kind === 'punch2' && typeof this.onPunchLanded === 'function') {
             const delayMs = Math.max(60, clip.duration * 400);
             const cb = this.onPunchLanded;
             setTimeout(() => {
                 try { cb(this); } catch (err) { console.warn('punch-landed cb', err); }
             }, delayMs);
         }
-        return true;
+
+        const onFinished = (e) => {
+            if (e.action !== next) return;
+            mixer.removeEventListener('finished', onFinished);
+
+            if (kind === 'punch1' && this._punchQueued && this._clips?.punch2) {
+                this._punchQueued = false;
+                this._startPunchClip('punch2', this._clips.punch2);
+                return;
+            }
+
+            this._punchStage = 0;
+            this._punchQueued = false;
+            this._suppressLocoAnim = false;
+            if (this._clips?.idle) {
+                const idle = mixer.clipAction(this._clips.idle);
+                idle.reset();
+                idle.setLoop(THREE.LoopRepeat, Infinity);
+                idle.fadeIn(0.14).play();
+                this._curAnimAction = idle;
+            }
+        };
+        mixer.addEventListener('finished', onFinished);
     }
 
     isPunching() {
         return performance.now() * 0.001 < this._punchLockUntil;
+    }
+
+    /** Settings slider writes here (1.0 … 10.0). Persisted to localStorage. */
+    setSensitivityMultiplier(v) {
+        const clamped = Math.max(1, Math.min(10, Number(v) || 1));
+        this.sensitivityMultiplier = clamped;
+        try {
+            localStorage.setItem('brewery_mouse_sensitivity', String(clamped));
+        } catch (_) { /* ignore */ }
     }
 
     clearAvatarForMenu() {
@@ -561,17 +648,18 @@ export class Player {
                 this.isLocked || (this._dragLookActive && gs?._pointerLockFailed && gs?.started);
             if (!canLook) return;
 
+            const look = this.sensitivity * this.sensitivityMultiplier;
             if (this._thirdPerson) {
-                this.euler.y -= e.movementX * this.sensitivity;
+                this.euler.y -= e.movementX * look;
                 const pitchSign = this.invertThirdPersonPitch ? 1 : -1;
-                this.euler.x += pitchSign * e.movementY * this.sensitivity;
+                this.euler.x += pitchSign * e.movementY * look;
                 this.euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.euler.x));
                 return;
             }
 
             this.euler.setFromQuaternion(this.camera.quaternion);
-            this.euler.y -= e.movementX * this.sensitivity;
-            this.euler.x -= e.movementY * this.sensitivity;
+            this.euler.y -= e.movementX * look;
+            this.euler.x -= e.movementY * look;
             this.euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.euler.x));
             this.camera.quaternion.setFromEuler(this.euler);
         });
@@ -598,9 +686,11 @@ export class Player {
             const gs = window.gameState;
             if (!gs?.started || gs.paused) return;
             if (gs.recipeShopOpen) return;
-            // Don't swing while mid-gesture (pour, grab, taunt, etc.);
-            // allow the next swing once the active punch clip releases.
-            if (this._suppressLocoAnim && !this.isPunching()) return;
+            // Don't swing while mid-gesture (pour, grab, taunt, etc.) —
+            // those one-shots also set `_suppressLocoAnim`. During an active
+            // punch combo we *do* want clicks to pass through so the second
+            // swing can queue, which is what `_punchStage > 0` covers.
+            if (this._suppressLocoAnim && this._punchStage === 0) return;
             this.punch();
         });
     }

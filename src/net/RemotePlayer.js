@@ -175,6 +175,12 @@ export class RemotePlayer {
     /**
      * Apply a local-only knockback visual. Direction is horizontal (dirX,dirZ);
      * a fixed upward component is added so the victim actually arcs.
+     *
+     * Once the victim lands we *do not* fade the horizontal offset back to
+     * zero — the user's expectation is that a knocked player has to walk
+     * back to where they were, rather than teleporting. We keep the offset
+     * in place and let the normal network lerp reconcile it naturally as
+     * their authoritative tab moves them around.
      */
     applyKnockback(dirX, dirZ, impulseXZ = 8.5) {
         const len = Math.hypot(dirX, dirZ) || 1;
@@ -183,7 +189,8 @@ export class RemotePlayer {
         this._knockVel.set(nx * impulseXZ, 5.0, nz * impulseXZ);
         this._knockOffset.set(0, 0, 0);
         this._knockTime = 0;
-        this._knockTimeMax = 1.2;
+        this._knockTimeMax = 1.0;
+        this._knockLanded = false;
     }
 
     update(delta) {
@@ -198,10 +205,13 @@ export class RemotePlayer {
         const ty = 1 - Math.exp(-LERP_YAW * delta);
         this._currentYaw += dy * ty;
 
-        // Advance knockback offset. Horizontal offset is added to the lerped
-        // position; vertical offset is a simple gravity arc. Once the timer
-        // expires we fade the offset back to zero so the incoming network
-        // state retakes control without a visible snap.
+        // Advance the active knockback arc. Horizontal offset is added to the
+        // lerped position; vertical offset is a simple gravity arc. Once the
+        // victim lands we bake the horizontal offset into `_currentPos` so
+        // the avatar stays put at the displaced location, and let the normal
+        // targetPos lerp bring them back organically only once their own tab
+        // sends fresh state (i.e. they walk themselves back). This avoids
+        // the "teleport to original position" snap the user called out.
         if (this._knockTimeMax > 0) {
             this._knockTime += delta;
             this._knockVel.y -= 14 * delta;
@@ -212,15 +222,14 @@ export class RemotePlayer {
                 this._knockOffset.y + this._knockVel.y * delta
             );
             if (this._knockOffset.y === 0 && this._knockVel.y < 0) {
-                this._knockVel.y = 0; // landed
-            }
-            if (this._knockTime >= this._knockTimeMax) {
-                const fade = Math.max(0, 1 - (this._knockTime - this._knockTimeMax) * 3);
-                this._knockOffset.x *= fade;
-                this._knockOffset.z *= fade;
-                if (fade <= 0) {
+                this._knockVel.y = 0;
+                if (!this._knockLanded) {
+                    this._knockLanded = true;
+                    this._currentPos.x += this._knockOffset.x;
+                    this._currentPos.z += this._knockOffset.z;
+                    this._knockOffset.x = 0;
+                    this._knockOffset.z = 0;
                     this._knockTimeMax = 0;
-                    this._knockOffset.set(0, 0, 0);
                     this._knockVel.set(0, 0, 0);
                 }
             }

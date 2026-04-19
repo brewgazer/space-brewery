@@ -27,6 +27,7 @@ export class UI {
         this._lastPromptText = null;
 
         this.audio = null;
+        this.player = null;
         this._pauseActions = null;
         this._pauseAudioWired = false;
         this._lastPauseVisible = false;
@@ -41,6 +42,12 @@ export class UI {
         this.audio = audioSystem;
         this._syncPauseAudioSliders();
         this._syncStartAudioSliders();
+    }
+
+    /** Player reference for the sensitivity slider. Safe to call before/after audio wiring. */
+    attachPlayer(player) {
+        this.player = player;
+        this._syncPauseAudioSliders();
     }
 
     _syncStartAudioSliders() {
@@ -84,9 +91,27 @@ export class UI {
     }
 
     _syncPauseAudioSliders() {
-        if (!this.audio || !this.elements.pauseBgm || !this.elements.pauseSfx) return;
-        this.elements.pauseBgm.value = String(Math.round(this.audio.bgmVolume * 100));
-        this.elements.pauseSfx.value = String(Math.round(this.audio.sfxVolume * 100));
+        if (this.audio && this.elements.pauseBgm && this.elements.pauseSfx) {
+            this.elements.pauseBgm.value = String(Math.round(this.audio.bgmVolume * 100));
+            this.elements.pauseSfx.value = String(Math.round(this.audio.sfxVolume * 100));
+        }
+        if (this.elements.pauseSens) {
+            let v = 1.0;
+            if (this.player && typeof this.player.sensitivityMultiplier === 'number') {
+                v = this.player.sensitivityMultiplier;
+            } else {
+                try {
+                    const raw = localStorage.getItem('brewery_mouse_sensitivity');
+                    if (raw != null && !Number.isNaN(parseFloat(raw))) {
+                        v = Math.max(1, Math.min(10, parseFloat(raw)));
+                    }
+                } catch (_) { /* ignore */ }
+            }
+            this.elements.pauseSens.value = String(v);
+            if (this.elements.pauseSensLabel) {
+                this.elements.pauseSensLabel.textContent = `Mouse sensitivity (${v.toFixed(1)}×)`;
+            }
+        }
     }
 
     _wirePauseMenuOnce() {
@@ -131,8 +156,21 @@ export class UI {
             const v = Number(this.elements.pauseSfx.value) / 100;
             this.audio.setSfxVolume(v);
         };
+        const onSens = () => {
+            if (!this.elements.pauseSens) return;
+            const v = Number(this.elements.pauseSens.value);
+            if (this.elements.pauseSensLabel) {
+                this.elements.pauseSensLabel.textContent = `Mouse sensitivity (${v.toFixed(1)}×)`;
+            }
+            if (this.player?.setSensitivityMultiplier) {
+                this.player.setSensitivityMultiplier(v);
+            } else {
+                try { localStorage.setItem('brewery_mouse_sensitivity', String(v)); } catch (_) { /* ignore */ }
+            }
+        };
         this.elements.pauseBgm.addEventListener('input', onBgm);
         this.elements.pauseSfx.addEventListener('input', onSfx);
+        this.elements.pauseSens?.addEventListener('input', onSens);
     }
 
     _buildUI() {
@@ -339,7 +377,7 @@ export class UI {
         };
 
         this.elements.pauseResume = mkBtn('pause-resume', 'Resume');
-        this.elements.pauseAudioBtn = mkBtn('pause-audio', 'Audio settings');
+        this.elements.pauseAudioBtn = mkBtn('pause-audio', 'Settings');
         this.elements.pauseRestartDay = mkBtn('pause-restart-day', 'Restart day');
         this.elements.pauseSaveExit = mkBtn('pause-save-exit', 'Save & exit to menu');
         this.elements.pauseRestart = mkBtn('pause-restart', 'Restart game (full reset)');
@@ -354,25 +392,27 @@ export class UI {
         this.elements.pauseAudioPanel.style.cssText = cardStyle + ' display: none;';
 
         const audioTitle = document.createElement('div');
-        audioTitle.textContent = 'Audio';
+        audioTitle.textContent = 'Settings';
         audioTitle.style.cssText =
             'font-size: 26px; font-weight: bold; text-align: center; color: #66eeff; margin-bottom: 4px;';
         this.elements.pauseAudioPanel.appendChild(audioTitle);
 
-        const row = (labelText, inputId) => {
+        const row = (labelText, inputId, min = '0', max = '100', step = '1') => {
             const wrap = document.createElement('label');
             wrap.style.cssText =
                 'display: flex; flex-direction: column; gap: 6px; color: #c8d8e8; font-size: 14px;';
-            wrap.textContent = labelText;
+            const header = document.createElement('span');
+            header.textContent = labelText;
+            wrap.appendChild(header);
             const input = document.createElement('input');
             input.type = 'range';
             input.id = inputId;
-            input.min = '0';
-            input.max = '100';
-            input.step = '1';
+            input.min = min;
+            input.max = max;
+            input.step = step;
             input.style.cssText = 'width: 100%; accent-color: #44aacc;';
             wrap.appendChild(input);
-            return { wrap, input };
+            return { wrap, input, header };
         };
 
         const bgmRow = row('Music volume', 'pause-bgm');
@@ -382,6 +422,11 @@ export class UI {
         const sfxRow = row('Sound effects volume', 'pause-sfx');
         this.elements.pauseAudioPanel.appendChild(sfxRow.wrap);
         this.elements.pauseSfx = sfxRow.input;
+
+        const sensRow = row('Mouse sensitivity', 'pause-sens', '1', '10', '0.5');
+        this.elements.pauseAudioPanel.appendChild(sensRow.wrap);
+        this.elements.pauseSens = sensRow.input;
+        this.elements.pauseSensLabel = sensRow.header;
 
         this.elements.pauseAudioBack = mkBtn('pause-audio-back', 'Back');
         this.elements.pauseAudioPanel.appendChild(this.elements.pauseAudioBack);

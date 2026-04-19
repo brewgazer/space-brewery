@@ -571,6 +571,8 @@ function wireStartMenuAndSettings() {
     const menuRow = document.getElementById('start-menu-buttons');
     const startBgm = document.getElementById('start-bgm');
     const startSfx = document.getElementById('start-sfx');
+    const startSens = document.getElementById('start-sens');
+    const startSensVal = document.getElementById('start-sens-val');
 
     document.querySelectorAll('.save-slot-btn').forEach((btn) => {
         btn.addEventListener('click', (e) => {
@@ -659,8 +661,27 @@ function wireStartMenuAndSettings() {
         if (!startSfx) return;
         audioSystem.setSfxVolume(Number(startSfx.value) / 100);
     };
+    const onStartSens = () => {
+        if (!startSens) return;
+        const v = Number(startSens.value);
+        if (startSensVal) startSensVal.textContent = `${v.toFixed(1)}×`;
+        player?.setSensitivityMultiplier?.(v);
+        // Keep the value cached even before the player is instantiated so the
+        // in-game pause panel can mirror it.
+        try { localStorage.setItem('brewery_mouse_sensitivity', String(v)); } catch (_) { /* ignore */ }
+    };
+    if (startSens) {
+        try {
+            const raw = localStorage.getItem('brewery_mouse_sensitivity');
+            if (raw != null && !Number.isNaN(parseFloat(raw))) {
+                startSens.value = String(Math.max(1, Math.min(10, parseFloat(raw))));
+            }
+        } catch (_) { /* ignore */ }
+        if (startSensVal) startSensVal.textContent = `${Number(startSens.value).toFixed(1)}×`;
+    }
     startBgm?.addEventListener('input', onStartBgm);
     startSfx?.addEventListener('input', onStartSfx);
+    startSens?.addEventListener('input', onStartSens);
 
     const menu = document.getElementById('start-screen');
     menu?.addEventListener(
@@ -1473,6 +1494,7 @@ function bootstrap() {
             gameAssetBucket = assetBucket;
             world = new World(scene, assetBucket);
             player = new Player(camera, scene, world.colliders, renderer.domElement);
+            ui.attachPlayer(player);
             interactionSystem = new InteractionSystem(camera, world.interactables);
             brewSystem = new BrewSystem(
                 scene,
