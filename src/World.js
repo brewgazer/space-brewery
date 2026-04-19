@@ -2968,10 +2968,21 @@ export class World {
                 -b1.min.y,
                 -(b1.min.z + b1.max.z) * 0.5
             );
-            juke.rotation.y = Math.PI / 2;
+            juke.rotation.y = -Math.PI / 2;
             group.add(juke);
             group.updateMatrixWorld(true);
             bb = new THREE.Box3().setFromObject(juke);
+            // Push the cabinet forward so its back sits flush against the
+            // divider wall instead of poking through. dividerZ is the wall
+            // plane; the 0.02 pad keeps z-fighting off the back panel.
+            const wallZ = this._taproom?.dividerZ ?? 0;
+            const inset = 0.02;
+            const overlap = wallZ + inset - bb.min.z;
+            if (overlap > 0) {
+                group.position.z += overlap;
+                group.updateMatrixWorld(true);
+                bb = new THREE.Box3().setFromObject(juke);
+            }
         } else {
             const cab = new THREE.Mesh(
                 new THREE.BoxGeometry(1.1, 1.9, 0.6),
