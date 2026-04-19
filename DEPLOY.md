@@ -2,6 +2,20 @@
 
 This gets a **shareable game link** (GitHub Pages) and a **WebSocket relay** (Railway) so friends can use **Find game → Online (relay)** from anywhere.
 
+### Before anything else: turn on Pages (Actions)
+
+If you skip this, the **Deploy to GitHub Pages** workflow fails with:
+
+`Get Pages site failed` / `HttpError: Not Found`.
+
+1. Open the repo on GitHub → **Settings** → **Pages**.
+2. Under **Build and deployment**, set **Source** to **GitHub Actions** (not “Deploy from a branch”).
+3. Leave the page (no branch picker needed when using Actions).
+
+Do this **once**, then pushes and workflow runs can deploy the site.
+
+---
+
 ## 1. Push this repo to GitHub
 
 Create a new repository on GitHub, then from your machine:
@@ -32,10 +46,9 @@ Keep this `wss://…` string for the next step.
    - Name: `BREW_RELAY_WSS_URL`
    - Value: your Railway WebSocket URL, e.g. `wss://something.up.railway.app`
 
-## 4. Enable GitHub Pages (Actions)
+## 4. Enable GitHub Pages (Actions) — required
 
-1. Repo → **Settings** → **Pages**.
-2. **Build and deployment** → **Source**: **GitHub Actions** (not “Deploy from a branch”).
+Same as [Before anything else](#before-anything-else-turn-on-pages-actions) above. **Settings** → **Pages** → **Source: GitHub Actions**.
 
 ## 5. Run the deploy workflow
 
