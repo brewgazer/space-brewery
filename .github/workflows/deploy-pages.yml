@@ -11,6 +11,10 @@ on:
     branches: ['main']
   workflow_dispatch:
 
+# Applies to every step (including nested Actions). Silences Node 20 deprecation for JS actions.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: read
   pages: write
@@ -23,9 +27,6 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Use Node 24 for JS-based Actions (checkout, configure-pages, etc.) — avoids Node 20 deprecation warnings.
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
