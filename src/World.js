@@ -419,12 +419,23 @@ export class World {
         this.scene.add(floor);
         this._staticEnvMeshes.push(floor);
 
-        const ceil = new THREE.Mesh(new THREE.PlaneGeometry(RW, RD), this._spaceCeilingMaterial());
+        const ceil = new THREE.Mesh(
+            new THREE.PlaneGeometry(RW, RD),
+            new THREE.MeshBasicMaterial({ color: 0x2a2438 })
+        );
         ceil.rotation.x = Math.PI / 2;
         ceil.position.y = ROOM_CEILING_Y;
         ceil.name = 'BuildingCeiling';
         this.scene.add(ceil);
         this._staticEnvMeshes.push(ceil);
+
+        // Skybox: big inverted sphere wrapped in the need_some_space.glb
+        // texture. This is the "void outside the building" — porthole windows
+        // punch depth-only cutouts through the walls so this sphere is what
+        // the player actually sees through them. Rendered first, never
+        // frustum-culled, never fogged so it stays at infinity regardless of
+        // camera position.
+        this._buildSkyVoid();
 
         const wm = this._hullPanelMaterial();
 
@@ -795,33 +806,41 @@ export class World {
     }
 
     /**
-     * Cached material for the whole-building ceiling. Pulls PBR maps out of
-     * the `spaceCeiling` texture slot (populated from need_some_space.glb in
-     * AssetLoader) and drives them with an emissive channel so the stars
-     * actually glow instead of reading as a dull matte plane. Falls back to
-     * a deep purple matte if the GLB failed to load.
+     * Build the space "void" that surrounds the building. A large inverted
+     * sphere textured with need_some_space.glb's image so the player sees it
+     * through porthole window cutouts. Uses BackSide rendering (texture shows
+     * on the inside of the sphere), is never fogged/frustum-culled, and
+     * renders before anything else so window depth-cutouts can reveal it.
+     * Silently no-ops if the GLB didn't ship a texture.
      */
-    _spaceCeilingMaterial() {
-        if (this._ceilingMat) return this._ceilingMat;
+    _buildSkyVoid() {
+        if (this._skyVoid) return this._skyVoid;
         const sc = this.assets?.textures?.spaceCeiling || {};
-        const hasTex = !!(sc.map || sc.emissiveMap);
-        if (!hasTex) {
-            this._ceilingMat = new THREE.MeshBasicMaterial({ color: 0x1a1430 });
-            return this._ceilingMat;
-        }
-        this._ceilingMat = new THREE.MeshStandardMaterial({
-            map: sc.map || null,
-            normalMap: sc.normalMap || null,
-            roughnessMap: sc.roughnessMap || null,
-            emissiveMap: sc.emissiveMap || sc.map || null,
-            emissive: new THREE.Color(0xffffff),
-            emissiveIntensity: sc.emissiveMap ? 1.0 : 0.55,
-            roughness: 0.85,
-            metalness: 0.0,
-            envMapIntensity: 0.0,
-            side: THREE.FrontSide,
-        });
-        return this._ceilingMat;
+        const tex = sc.map || sc.emissiveMap;
+        if (!tex) return null;
+        // Clone so we can tweak wrap/offset without affecting other users of
+        // the shared texture (e.g. if windows ever sample the same source).
+        const skyTex = tex.clone();
+        skyTex.wrapS = skyTex.wrapT = THREE.RepeatWrapping;
+        skyTex.colorSpace = THREE.SRGBColorSpace;
+        skyTex.needsUpdate = true;
+        skyTex.userData = { ...(skyTex.userData || {}), shared: true };
+        const sphere = new THREE.Mesh(
+            new THREE.SphereGeometry(400, 64, 32),
+            new THREE.MeshBasicMaterial({
+                map: skyTex,
+                side: THREE.BackSide,
+                toneMapped: false,
+                fog: false,
+                depthWrite: false,
+            })
+        );
+        sphere.name = 'SpaceVoid';
+        sphere.renderOrder = -1000; // draw first, before all walls & windows
+        sphere.frustumCulled = false;
+        this.scene.add(sphere);
+        this._skyVoid = sphere;
+        return sphere;
     }
 
     // ─── brew stations ──────────────────────────────────────
@@ -3301,36 +3320,48 @@ export class World {
 
     /**
      * Taproom wall dressing: three framed posters + circular "portholes" that
-     * look out into deep space. The portholes share a procedural starfield
-     * canvas texture and sit flush against the curved outer wall / divider
-     * so the walls read as an orbital station hull rather than a flat
-     * interior. No physics changes — everything here is decorative and
-     * frozen into `_staticEnvMeshes` so matrices aren't rebuilt each frame.
+     * are REAL windows — each porthole renders an invisible depth-only disc
+     * against the wall so the wall segment fails its depth test inside the
+     * circle, revealing the sky-void sphere rendered behind the scene at
+     * infinity (see World._buildSkyVoid). Players see whatever is outside
+     * the building through the hole — it's the same texture the skybox uses,
+     * not a painted starfield. No physics changes — windows are decorative
+     * and frozen into `_staticEnvMeshes` so matrices aren't rebuilt each
+     * frame.
      */
     _buildTaproomWallArt() {
         const tap = this._taproom;
         if (!tap) return;
 
         const posters = this.assets?.textures?.posters || {};
-        const spaceTex = this._getSpaceWindowTexture();
 
         /**
-         * Frame + glass assembly for one round porthole. The "glass" is just a
-         * radial gradient + stars; the frame is an emissive torus so the
-         * window reads even in dim taproom lighting.
+         * Frame + real window cutout for one round porthole. The cutout is an
+         * invisible disc (colorWrite:false) that writes depth BEHIND the
+         * frame rings but IN FRONT of the wall, so the curved wall fails its
+         * depth test inside the circle while the sky-void sphere stays
+         * visible. The whole assembly is mounted 25 cm inward so the cutout
+         * is clear of the 0.3 m-thick wall and never z-fights it.
          */
         const buildPorthole = (radius) => {
             const group = new THREE.Group();
-            const disc = new THREE.Mesh(
-                new THREE.CircleGeometry(radius, 40),
+            // Depth-only cutout. Positioned at NEGATIVE local z so it sits
+            // behind the frame rings (frame renders first, so its color
+            // stays in the framebuffer; cutout then only writes depth where
+            // the frame didn't cover). Slightly larger radius than the
+            // frame's outer torus so misalignment between the flat disc and
+            // the segmented wall curve never shows a crescent of obsidian.
+            const cutout = new THREE.Mesh(
+                new THREE.CircleGeometry(radius * 1.18, 48),
                 new THREE.MeshBasicMaterial({
-                    map: spaceTex,
-                    toneMapped: false,
-                    depthWrite: false,
+                    colorWrite: false,
+                    depthWrite: true,
+                    depthTest: true,
                 })
             );
-            disc.position.z = 0.01;
-            group.add(disc);
+            cutout.position.z = -0.04; // 4 cm behind the frame, ~21 cm inward of the wall centre (still clear of wall inner face)
+            cutout.renderOrder = -500; // after sky (-1000), before walls (default 0)
+            group.add(cutout);
 
             const innerFrame = new THREE.Mesh(
                 new THREE.TorusGeometry(radius * 1.02, radius * 0.06, 10, 40),
@@ -3463,7 +3494,10 @@ export class World {
         ];
         for (const spot of portholeSpots) {
             const p = buildPorthole(spot.r);
-            mountOnCurvedWall(p, spot.t, spot.y, 0.16);
+            // Bumped from 0.16 → 0.25 so the negative-z cutout disc still
+            // sits cleanly in front of the 0.3 m-thick curved wall's inner
+            // face (centre of wall + 0.15 m) without any z-fighting.
+            mountOnCurvedWall(p, spot.t, spot.y, 0.25);
             addStatic(p);
         }
 
@@ -3492,116 +3526,4 @@ export class World {
         }
     }
 
-    /**
-     * Procedural starfield for the porthole "windows". Renders once, cached
-     * on the World instance, and shared by every porthole mesh so we only
-     * upload one texture to the GPU. Content: dark indigo vignette, scatter
-     * of bright stars, a couple of nebula smudges and a faint ringed planet
-     * silhouette so each window reads as "looking into space".
-     */
-    _getSpaceWindowTexture() {
-        if (this._spaceWindowTexture) return this._spaceWindowTexture;
-
-        const size = 512;
-        const canvas = document.createElement('canvas');
-        canvas.width = canvas.height = size;
-        const ctx = canvas.getContext('2d');
-
-        // Radial vignette: deep indigo centre fading to near-black edges so
-        // the disc reads as a round porthole rather than a square swatch.
-        const bg = ctx.createRadialGradient(
-            size * 0.5, size * 0.5, size * 0.1,
-            size * 0.5, size * 0.5, size * 0.5
-        );
-        bg.addColorStop(0, '#1a1838');
-        bg.addColorStop(0.55, '#070616');
-        bg.addColorStop(1, '#020108');
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, size, size);
-
-        // Faint nebula smudges.
-        const nebulae = [
-            { x: 0.32, y: 0.36, r: 0.28, col: 'rgba(120, 80, 200, 0.18)' },
-            { x: 0.72, y: 0.66, r: 0.32, col: 'rgba(60, 150, 220, 0.16)' },
-            { x: 0.55, y: 0.22, r: 0.18, col: 'rgba(220, 120, 180, 0.12)' },
-        ];
-        for (const n of nebulae) {
-            const g = ctx.createRadialGradient(
-                n.x * size, n.y * size, 2,
-                n.x * size, n.y * size, n.r * size
-            );
-            g.addColorStop(0, n.col);
-            g.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.fillStyle = g;
-            ctx.fillRect(0, 0, size, size);
-        }
-
-        // Stars — deterministic layout via a simple LCG so every porthole
-        // shows the same view (they're all "looking out" through the hull).
-        let seed = 1337;
-        const rand = () => {
-            seed = (seed * 1664525 + 1013904223) >>> 0;
-            return seed / 0xffffffff;
-        };
-        for (let i = 0; i < 320; i++) {
-            const x = rand() * size;
-            const y = rand() * size;
-            const r = rand() * 1.2 + 0.2;
-            const a = rand() * 0.7 + 0.25;
-            ctx.fillStyle = `rgba(255, 245, 230, ${a})`;
-            ctx.beginPath();
-            ctx.arc(x, y, r, 0, Math.PI * 2);
-            ctx.fill();
-        }
-        // A dozen brighter "beacon" stars with a subtle halo.
-        for (let i = 0; i < 12; i++) {
-            const x = rand() * size;
-            const y = rand() * size;
-            const g = ctx.createRadialGradient(x, y, 0, x, y, 6);
-            g.addColorStop(0, 'rgba(255,255,255,1)');
-            g.addColorStop(1, 'rgba(255,255,255,0)');
-            ctx.fillStyle = g;
-            ctx.beginPath();
-            ctx.arc(x, y, 6, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        // Ringed planet in the lower-right-ish area for visual anchoring.
-        const pcx = size * 0.66;
-        const pcy = size * 0.72;
-        const pr = size * 0.12;
-        const planetGrad = ctx.createRadialGradient(
-            pcx - pr * 0.35, pcy - pr * 0.35, pr * 0.1,
-            pcx, pcy, pr
-        );
-        planetGrad.addColorStop(0, '#f0c078');
-        planetGrad.addColorStop(0.55, '#c87848');
-        planetGrad.addColorStop(1, '#331810');
-        ctx.fillStyle = planetGrad;
-        ctx.beginPath();
-        ctx.arc(pcx, pcy, pr, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.save();
-        ctx.translate(pcx, pcy);
-        ctx.rotate(-0.35);
-        ctx.scale(1, 0.22);
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(230, 200, 150, 0.65)';
-        ctx.beginPath();
-        ctx.arc(0, 0, pr * 1.55, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = 'rgba(255, 230, 190, 0.9)';
-        ctx.beginPath();
-        ctx.arc(0, 0, pr * 1.72, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.needsUpdate = true;
-        this._spaceWindowTexture = tex;
-        return tex;
-    }
 }
