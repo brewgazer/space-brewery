@@ -72,11 +72,6 @@ export async function loadGameAssets(renderer, scene) {
          * Any sub-map may be null if the GLB didn't ship one.
          */
         obsidianTile: { map: null, normalMap: null, roughnessMap: null, metalnessMap: null, aoMap: null },
-        /**
-         * Texture extracted from need_some_space.glb — space-themed ceiling
-         * texture applied to the taproom ceiling only (World._buildTaproomCeiling).
-         */
-        spaceCeiling: { map: null, normalMap: null, roughnessMap: null, emissiveMap: null },
     };
 
     const texLoader = new THREE.TextureLoader();
@@ -384,48 +379,20 @@ export async function loadGameAssets(renderer, scene) {
         console.warn('obsidian_tile.glb missing — taproom wall keeps hull panel look.', e?.message || e);
     }
 
-    // Space-themed ceiling texture, extracted from need_some_space.glb.
+    // Whole-scene skybox, loaded straight from sky_void.glb and used AS-IS
+    // (see World._buildSkyVoid). Preserves whatever geometry/mapping the
+    // skybox author shipped — typically an inside-out sphere with the
+    // nebula texture already baked onto the inner faces.
+    let skyVoidTemplate = null;
     try {
-        const ceilGltf = await withTimeout(
-            loader.loadAsync('assets/models/taproom_ceiling.glb'),
+        const skyGltf = await withTimeout(
+            loader.loadAsync('assets/models/sky_void.glb'),
             60000,
-            'taproom_ceiling.glb'
+            'sky_void.glb'
         );
-        let pickedMat = null;
-        ceilGltf.scene.traverse((o) => {
-            if (pickedMat) return;
-            if (!o.isMesh) return;
-            const m = Array.isArray(o.material) ? o.material[0] : o.material;
-            if (m && (m.map || m.emissiveMap || m.normalMap)) pickedMat = m;
-        });
-        if (pickedMat) {
-            const cloneMap = (t, isColor) => {
-                if (!t) return null;
-                const c = t.clone();
-                c.needsUpdate = true;
-                c.wrapS = c.wrapT = THREE.RepeatWrapping;
-                c.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-                const maxA = renderer.capabilities.getMaxAnisotropy?.() ?? 4;
-                c.anisotropy = Math.min(8, maxA);
-                c.userData = { ...(c.userData || {}), shared: true };
-                return c;
-            };
-            textures.spaceCeiling.map = cloneMap(pickedMat.map, true);
-            textures.spaceCeiling.normalMap = cloneMap(pickedMat.normalMap, false);
-            textures.spaceCeiling.roughnessMap = cloneMap(pickedMat.roughnessMap, false);
-            textures.spaceCeiling.emissiveMap = cloneMap(pickedMat.emissiveMap, true);
-            console.info(
-                'Space ceiling maps loaded:',
-                Object.entries(textures.spaceCeiling)
-                    .filter(([, v]) => v)
-                    .map(([k]) => k)
-                    .join(', ')
-            );
-        } else {
-            console.warn('taproom_ceiling.glb had no textured material — taproom keeps default ceiling.');
-        }
+        skyVoidTemplate = skyGltf.scene;
     } catch (e) {
-        console.warn('taproom_ceiling.glb missing — taproom keeps default ceiling.', e?.message || e);
+        console.warn('sky_void.glb missing — scene renders without a starfield void.', e?.message || e);
     }
 
     let jukeboxTemplate = null;
@@ -536,6 +503,7 @@ export async function loadGameAssets(renderer, scene) {
         taproomChandelierTemplate,
         jukeboxTemplate,
         portalDoorTemplate,
+        skyVoidTemplate,
         kegTemplate,
         grainBucketTemplate,
         grainMillTemplate,

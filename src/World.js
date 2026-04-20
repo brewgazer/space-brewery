@@ -806,41 +806,58 @@ export class World {
     }
 
     /**
-     * Build the space "void" that surrounds the building. A large inverted
-     * sphere textured with need_some_space.glb's image so the player sees it
-     * through porthole window cutouts. Uses BackSide rendering (texture shows
-     * on the inside of the sphere), is never fogged/frustum-culled, and
-     * renders before anything else so window depth-cutouts can reveal it.
-     * Silently no-ops if the GLB didn't ship a texture.
+     * Build the space "void" that surrounds the building. Uses the pre-made
+     * skybox GLB (free_-_skybox_space_nebula.glb) directly so whatever
+     * geometry + UV mapping the author authored stays intact. Scaled large,
+     * re-centered on world origin, and forced to render first/behind
+     * everything so the porthole window cutouts reveal it.
      */
     _buildSkyVoid() {
         if (this._skyVoid) return this._skyVoid;
-        const sc = this.assets?.textures?.spaceCeiling || {};
-        const tex = sc.map || sc.emissiveMap;
-        if (!tex) return null;
-        // Clone so we can tweak wrap/offset without affecting other users of
-        // the shared texture (e.g. if windows ever sample the same source).
-        const skyTex = tex.clone();
-        skyTex.wrapS = skyTex.wrapT = THREE.RepeatWrapping;
-        skyTex.colorSpace = THREE.SRGBColorSpace;
-        skyTex.needsUpdate = true;
-        skyTex.userData = { ...(skyTex.userData || {}), shared: true };
-        const sphere = new THREE.Mesh(
-            new THREE.SphereGeometry(400, 64, 32),
-            new THREE.MeshBasicMaterial({
-                map: skyTex,
-                side: THREE.BackSide,
-                toneMapped: false,
-                fog: false,
-                depthWrite: false,
-            })
-        );
-        sphere.name = 'SpaceVoid';
-        sphere.renderOrder = -1000; // draw first, before all walls & windows
-        sphere.frustumCulled = false;
-        this.scene.add(sphere);
-        this._skyVoid = sphere;
-        return sphere;
+        const tpl = this.assets?.skyVoidTemplate;
+        if (!tpl) return null;
+
+        const sky = tpl.clone(true);
+        // Normalise scale: the source GLB can ship at any size, we want the
+        // visible skybox shell to sit at ~400 m from world origin regardless.
+        const box = new THREE.Box3().setFromObject(sky);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const largest = Math.max(size.x, size.y, size.z) || 1;
+        const targetDiameter = 800;
+        sky.scale.setScalar(targetDiameter / largest);
+        // Re-center on origin so the camera is always "inside" the skybox.
+        box.setFromObject(sky);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        sky.position.sub(center);
+
+        sky.traverse((o) => {
+            if (!o.isMesh) return;
+            o.frustumCulled = false;
+            o.castShadow = false;
+            o.receiveShadow = false;
+            o.renderOrder = -1000; // behind everything
+            const mats = Array.isArray(o.material) ? o.material : [o.material];
+            for (const m of mats) {
+                if (!m) continue;
+                m.side = THREE.BackSide; // show the inside of the shell
+                m.depthWrite = false;
+                m.toneMapped = false;
+                m.fog = false;
+                // Unlit-ish: no shadows, no env contribution.
+                if (m.envMapIntensity != null) m.envMapIntensity = 0;
+                if (m.emissiveIntensity != null && m.emissiveMap) {
+                    m.emissiveIntensity = Math.max(m.emissiveIntensity, 1.0);
+                }
+                m.needsUpdate = true;
+            }
+        });
+
+        sky.name = 'SpaceVoid';
+        this.scene.add(sky);
+        this._skyVoid = sky;
+        return sky;
     }
 
     // ─── brew stations ──────────────────────────────────────
