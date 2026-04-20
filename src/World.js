@@ -878,6 +878,11 @@ export class World {
                         o.receiveShadow = true;
                     }
                 });
+                // Rotate the kettle 180° so its "front" (pipes/display) faces
+                // the player approach side instead of the back wall. Applied
+                // before the bbox recentre so the rotated model still lands
+                // centred on the brew slot.
+                mash.rotation.y = Math.PI;
                 mash.updateMatrixWorld(true);
                 const b0 = new THREE.Box3().setFromObject(mash);
                 const h0 = b0.max.y - b0.min.y;
@@ -1209,6 +1214,13 @@ export class World {
             const model = millTpl.clone(true);
             model.scale.setScalar(2); // 2× the native model size (per player feedback)
             group.add(model);
+            // Lift the scaled model so its lowest point sits exactly on the
+            // floor (y = 0). Doubling the scale also doubled whatever negative
+            // Y offset the GLB's origin had, sinking the mill through the
+            // ground — compute the post-scale bbox and nudge up by −min.y.
+            group.updateMatrixWorld(true);
+            const bbMill = new THREE.Box3().setFromObject(model);
+            model.position.y -= bbMill.min.y - group.position.y;
             model.traverse((o) => {
                 if (o.isMesh && typeof o.name === 'string') {
                     const n = o.name.toLowerCase();
@@ -3250,7 +3262,7 @@ export class World {
             // from its own bounding box rather than hard-coding a scalar.
             const b0 = new THREE.Box3().setFromObject(juke);
             const h0 = Math.max(0.001, b0.max.y - b0.min.y);
-            const targetH = 3.8; // 2× the original 1.9 m (per player feedback)
+            const targetH = 3.8 * (2 / 3); // 2/3 of the previous 3.8 m (per player feedback) ≈ 2.53 m
             const s = targetH / h0;
             juke.scale.setScalar(s);
             juke.updateMatrixWorld(true);
