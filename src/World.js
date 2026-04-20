@@ -881,7 +881,7 @@ export class World {
                 mash.updateMatrixWorld(true);
                 const b0 = new THREE.Box3().setFromObject(mash);
                 const h0 = b0.max.y - b0.min.y;
-                const targetH = 2.48;
+                const targetH = 4.96; // 2× the original 2.48 m (per player feedback)
                 const sc = targetH / Math.max(0.001, h0);
                 mash.scale.setScalar(sc);
                 mash.updateMatrixWorld(true);
@@ -931,16 +931,16 @@ export class World {
             }
 
             const label = this._textSprite('Mash Tun', 0xffc8f0);
-            label.position.y = 2.8; group.add(label);
+            label.position.y = 5.6; group.add(label); // 2× label Y to sit above the enlarged kettle
 
             const progressBg = new THREE.Mesh(new THREE.BoxGeometry(2, 0.15, 0.15), this._mat(0x333333));
-            progressBg.position.set(0, 2.6, 0.5); group.add(progressBg);
+            progressBg.position.set(0, 5.2, 1.0); group.add(progressBg); // 2× position of original (0, 2.6, 0.5)
 
             const progressFill = new THREE.Mesh(
                 new THREE.BoxGeometry(2, 0.12, 0.12),
                 new THREE.MeshStandardMaterial({ color: 0x44aa44, emissive: 0x224422 })
             );
-            progressFill.position.set(0, 2.6, 0.5);
+            progressFill.position.set(0, 5.2, 1.0); // matches progressBg
             progressFill.scale.x = 0; progressFill.visible = false; group.add(progressFill);
 
             const liquid = new THREE.Mesh(
@@ -956,7 +956,7 @@ export class World {
                     emissiveIntensity: 0.42,
                 })
             );
-            liquid.position.y = 1.48;
+            liquid.position.y = 2.96; // 2× of 1.48 so liquid sits inside the enlarged kettle
             liquid.visible = false;
             group.add(liquid);
 
@@ -969,10 +969,10 @@ export class World {
             this.scene.add(group);
 
             const hitbox = new THREE.Mesh(
-                new THREE.BoxGeometry(2.5, 2.5, 2),
+                new THREE.BoxGeometry(5, 5, 4), // 2× original (2.5, 2.5, 2) to match the enlarged mash tun
                 new THREE.MeshBasicMaterial({ visible: false })
             );
-            hitbox.position.copy(pos); hitbox.position.y = 1.25;
+            hitbox.position.copy(pos); hitbox.position.y = 2.5; // 2× original 1.25 so hitbox sits on the floor
             hitbox.userData = { type: 'brewStation', index };
             this.scene.add(hitbox);
             this.interactables.push(hitbox);
@@ -1074,7 +1074,7 @@ export class World {
             term.updateMatrixWorld(true);
             const b0 = new THREE.Box3().setFromObject(term);
             const h0 = b0.max.y - b0.min.y;
-            const targetH = 2.08 * (5 / 8);
+            const targetH = 2.08 * (5 / 8) * 2; // 2× the original sizing (per player feedback)
             const s = targetH / Math.max(0.001, h0);
             term.scale.setScalar(s);
             term.updateMatrixWorld(true);
@@ -1207,6 +1207,7 @@ export class World {
 
         if (millTpl) {
             const model = millTpl.clone(true);
+            model.scale.setScalar(2); // 2× the native model size (per player feedback)
             group.add(model);
             model.traverse((o) => {
                 if (o.isMesh && typeof o.name === 'string') {
@@ -1243,11 +1244,11 @@ export class World {
         }
 
         const title = this._textSprite('GRAIN MILL', 0xffe8a8, 0.65);
-        title.position.y = millTpl ? 1.85 : 2.15;
+        title.position.y = millTpl ? 3.7 : 2.15; // 2× title height when the GLB is scaled
         group.add(title);
 
         const progressBg = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.12, 0.12), this._mat(0x333333));
-        progressBg.position.set(0, millTpl ? 1.68 : 1.95, 0.95);
+        progressBg.position.set(0, millTpl ? 3.36 : 1.95, 0.95); // 2× progress-bar height when the GLB is scaled
         group.add(progressBg);
 
         const progressFill = new THREE.Mesh(
@@ -1262,10 +1263,10 @@ export class World {
         this.scene.add(group);
 
         const hitbox = new THREE.Mesh(
-            new THREE.BoxGeometry(2.4, 2.2, 1.8),
+            new THREE.BoxGeometry(4.8, 4.4, 3.6), // 2× original (2.4, 2.2, 1.8) to match the enlarged mill
             new THREE.MeshBasicMaterial({ visible: false })
         );
-        hitbox.position.set(pos.x, 1.1, pos.z);
+        hitbox.position.set(pos.x, 2.2, pos.z); // 2× original 1.1 so hitbox sits on the floor
         hitbox.userData = { type: 'grainMill' };
         this.scene.add(hitbox);
         this.interactables.push(hitbox);
@@ -3249,7 +3250,7 @@ export class World {
             // from its own bounding box rather than hard-coding a scalar.
             const b0 = new THREE.Box3().setFromObject(juke);
             const h0 = Math.max(0.001, b0.max.y - b0.min.y);
-            const targetH = 1.9;
+            const targetH = 3.8; // 2× the original 1.9 m (per player feedback)
             const s = targetH / h0;
             juke.scale.setScalar(s);
             juke.updateMatrixWorld(true);
